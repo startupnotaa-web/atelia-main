@@ -64,7 +64,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
-            const firebasePlan = data.plan || 'free';
+            const firebasePlan = data.planType || data.plan || 'free';
             
             setCurrentPlanState(firebasePlan as PlanType);
             localStorage.setItem('@artesas/plan', firebasePlan);

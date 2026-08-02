@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { auth } from '@/lib/firebase';
+import { toast } from 'react-hot-toast';
 import { motion, Variants, AnimatePresence } from 'framer-motion';
 import { 
   FileText, TrendingUp, Package, Sparkles, Target, Star, 
@@ -11,6 +13,48 @@ import {
 
 export default function LandingPage() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) setUserId(user.uid);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleUpgrade = async () => {
+    if (!userId) {
+      window.location.href = '/cadastro';
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval: 'monthly', userId }),
+      });
+
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || data.message || "Erro retornado pelo servidor.");
+      }
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error("Não foi possível gerar o link de checkout.");
+      }
+    } catch (error: any) {
+      console.error("Erro detalhado no checkout:", error);
+      toast.error(error.message || "Erro ao iniciar o checkout. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const toggleFaq = (index: number) => {
     setOpenFaq(openFaq === index ? null : index);
@@ -397,9 +441,13 @@ export default function LandingPage() {
                 </li>
               </ul>
               
-              <Link href="/cadastro" className="mt-auto block w-full py-4 text-center font-bold text-primary bg-white rounded-xl shadow-lg hover:bg-surface transition-colors">
-                Assinar Plano Pro
-              </Link>
+              <button 
+                onClick={handleUpgrade}
+                disabled={loading}
+                className="mt-auto block w-full py-4 text-center font-bold text-primary bg-white rounded-xl shadow-lg hover:bg-surface transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Redirecionando...' : 'Assinar Plano Pro'}
+              </button>
             </motion.div>
           </motion.div>
         </div>

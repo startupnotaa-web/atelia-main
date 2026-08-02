@@ -65,7 +65,7 @@ export default function AdminDashboardPage() {
       const userData: UserData = {
         id: data.id,
         email: data.email || 'Sem e-mail',
-        plan: data.plan || 'free',
+        plan: data.planType || data.plan || 'free',
         createdAt: data.createdAt || new Date().toISOString(),
         lastLogin: data.lastLogin
       };

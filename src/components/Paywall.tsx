@@ -38,7 +38,7 @@ export default function Paywall({
     try {
       const interval = isAnnual ? 'yearly' : 'monthly';
 
-      const res = await fetch('/api/checkout', {
+      const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -61,7 +61,7 @@ export async function PATCH(request: Request) {
     const db = getAdminDb();
     const userRef = db.collection('users').doc(userId);
     
-    await userRef.update({ plan });
+    await userRef.update({ plan, planType: plan });
     
     return NextResponse.json({ success: true });
   } catch (error: any) {

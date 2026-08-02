@@ -1,7 +1,9 @@
 'use client';
 
 import { X, Crown, ArrowRight } from 'lucide-react';
-import Link from 'next/link';
+import { useState, useEffect } from 'react';
+import { auth } from '@/lib/firebase';
+import { toast } from 'react-hot-toast';
 
 interface LimitModalProps {
   isOpen: boolean;
@@ -10,6 +12,49 @@ interface LimitModalProps {
 }
 
 export default function LimitModal({ isOpen, onClose, itemName }: LimitModalProps) {
+  const [loading, setLoading] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) setUserId(user.uid);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleUpgrade = async () => {
+    if (!userId) {
+      toast.error('Você precisa estar logado para assinar.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval: 'monthly', userId }), // Defaulting to monthly here, they can change it in the portal or landing page, or we can hardcode for LimitModal
+      });
+
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || data.message || "Erro retornado pelo servidor.");
+      }
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error("Não foi possível gerar o link de checkout.");
+      }
+    } catch (error: any) {
+      console.error("Erro detalhado no checkout:", error);
+      toast.error(error.message || "Erro ao iniciar o checkout. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -38,13 +83,14 @@ export default function LimitModal({ isOpen, onClose, itemName }: LimitModalProp
             Assine o plano Pro para ter cadastros ilimitados e escalar seu ateliê!
           </p>
 
-          <Link 
-            href="/perfil" // Rota correta de conta/upgrade
-            className="w-full bg-secondary hover:bg-[#132A4A] text-white font-black text-lg py-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2"
+          <button 
+            onClick={handleUpgrade}
+            disabled={loading}
+            className="w-full bg-secondary hover:bg-[#132A4A] text-white font-black text-lg py-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            Assinar Plano Pro
-            <ArrowRight size={20} />
-          </Link>
+            {loading ? 'Redirecionando...' : 'Assinar Plano Pro'}
+            {!loading && <ArrowRight size={20} />}
+          </button>
           
           <button 
             onClick={onClose}

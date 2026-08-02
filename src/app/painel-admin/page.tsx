@@ -57,10 +57,14 @@ export default function PainelAdminPage() {
       setError(null);
 
       const usersSnapshot = await getDocs(collection(db, 'users'));
-      const usersData: AppUser[] = usersSnapshot.docs.map(docSnap => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      } as AppUser));
+      const usersData: AppUser[] = usersSnapshot.docs.map(docSnap => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          ...d,
+          plan: d.planType || d.plan || 'free',
+        } as AppUser;
+      });
 
       setUsers(usersData);
     } catch (error: any) {
