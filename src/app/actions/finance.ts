@@ -1,0 +1,102 @@
+'use server';
+
+import { getAdminDb } from '@/lib/firebase-admin';
+import { revalidatePath } from 'next/cache';
+
+// ============================================================
+// TYPES
+// ============================================================
+
+export type FinanceEntryType = 'entrada' | 'saida';
+
+export interface FinanceEntry {
+  id: string;
+  date: string;
+  type: FinanceEntryType;
+  category: string;
+  value: number;
+  description: string;
+  createdAt: string;
+}
+
+// ============================================================
+// SERVER ACTIONS
+// ============================================================
+
+export async function fetchFinanceEntries(userId: string, limit = 10): Promise<FinanceEntry[]> {
+  try {
+    if (!userId) throw new Error('Usuário não autenticado');
+    const db = getAdminDb();
+    const snapshot = await db.collection('finance_entries')
+      .where('userId', '==', userId)
+      .get();
+      
+    const docs = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as FinanceEntry[];
+
+    return docs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()).slice(0, limit);
+  } catch (error) {
+    console.error('Erro ao buscar lançamentos financeiros:', error);
+    return [];
+  }
+}
+
+export async function addFinanceEntry(data: Omit<FinanceEntry, 'id' | 'createdAt'>, userId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!userId) throw new Error('Usuário não autenticado');
+    const db = getAdminDb();
+    const newEntry = {
+      ...data,
+      userId,
+      createdAt: new Date().toISOString()
+    };
+    
+    await db.collection('finance_entries').add(newEntry);
+    
+    // Revalida a dashboard após a inclusão de um dado financeiro
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (error) {
+    console.error('Erro no servidor:', error);
+    return { success: false, error: 'Falha ao registrar lançamento financeiro.' };
+  }
+}
+
+export async function fetchInitialBalance(userId: string): Promise<number> {
+  try {
+    if (!userId) throw new Error('Usuário não autenticado');
+    const db = getAdminDb();
+    const doc = await db.collection('settings').doc(userId).get();
+    if (doc.exists) {
+      return doc.data()?.initialBalance || 0;
+    }
+    return 0; // Default if not set
+  } catch (error) {
+    console.error('Erro ao buscar saldo inicial:', error);
+    return 0;
+  }
+}
+
+export async function updateInitialBalance(newBalance: number, userId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!userId) throw new Error('Usuário não autenticado');
+    const db = getAdminDb();
+    await db.collection('settings').doc(userId).set({
+      initialBalance: newBalance,
+      userId,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (error) {
+    console.error('Erro ao atualizar saldo inicial:', error);
+    return { success: false, error: 'Falha ao atualizar saldo inicial' };
+  }
+}
+
+export async function forceRevalidateDashboard() {
+  revalidatePath('/dashboard');
+}
