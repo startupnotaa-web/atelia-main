@@ -405,59 +405,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* NOVO: PERGUNTAS FREQUENTES (FAQ) */}
-      <section className="py-24 border-y border-border">
-        <div className="container mx-auto px-6 max-w-3xl">
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, margin: "-100px" }}
-            variants={fadeInUp}
-            className="text-center mb-16"
-          >
-            <h2 className="text-3xl md:text-5xl font-heading font-black mb-4">Perguntas Frequentes.</h2>
-            <p className="text-xl text-secondary font-medium">Tudo o que você precisa saber.</p>
-          </motion.div>
-
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, margin: "-100px" }}
-            variants={staggerContainer}
-            className="space-y-4"
-          >
-            {faqs.map((faq, index) => (
-              <motion.div variants={fadeInUp} key={index} className="border border-border rounded-2xl overflow-hidden bg-surface">
-                <button
-                  onClick={() => toggleFaq(index)}
-                  className="w-full flex items-center justify-between p-6 text-left hover:bg-black/5 transition-colors"
-                >
-                  <span className="font-heading font-bold text-lg pr-4">{faq.question}</span>
-                  <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${openFaq === index ? 'bg-primary text-white' : 'bg-background text-secondary'}`}>
-                    {openFaq === index ? <Minus size={16} /> : <Plus size={16} />}
-                  </div>
-                </button>
-                
-                <AnimatePresence>
-                  {openFaq === index && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.3, ease: "easeInOut" }}
-                    >
-                      <div className="px-6 pb-6 text-secondary font-medium leading-relaxed border-t border-border/50 pt-4">
-                        {faq.answer}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
-
       {/* A MISSÃO E FUNDADOR (CEO) */}
       <section className="container mx-auto px-6 py-24 md:py-32">
         <motion.div
@@ -502,6 +449,59 @@ export default function LandingPage() {
             </div>
           </motion.div>
         </motion.div>
+      </section>
+
+      {/* NOVO: PERGUNTAS FREQUENTES (FAQ) */}
+      <section className="py-24 border-y border-border bg-surface">
+        <div className="container mx-auto px-6 max-w-3xl">
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-100px" }}
+            variants={fadeInUp}
+            className="text-center mb-16"
+          >
+            <h2 className="text-3xl md:text-5xl font-heading font-black mb-4">Perguntas Frequentes.</h2>
+            <p className="text-xl text-secondary font-medium">Tudo o que você precisa saber.</p>
+          </motion.div>
+
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-100px" }}
+            variants={staggerContainer}
+            className="space-y-4"
+          >
+            {faqs.map((faq, index) => (
+              <motion.div variants={fadeInUp} key={index} className="border border-border rounded-2xl overflow-hidden bg-background">
+                <button
+                  onClick={() => toggleFaq(index)}
+                  className="w-full flex items-center justify-between p-6 text-left hover:bg-black/5 transition-colors"
+                >
+                  <span className="font-heading font-bold text-lg pr-4">{faq.question}</span>
+                  <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${openFaq === index ? 'bg-primary text-white' : 'bg-surface text-secondary'}`}>
+                    {openFaq === index ? <Minus size={16} /> : <Plus size={16} />}
+                  </div>
+                </button>
+                
+                <AnimatePresence>
+                  {openFaq === index && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: "easeInOut" }}
+                    >
+                      <div className="px-6 pb-6 text-secondary font-medium leading-relaxed border-t border-border/50 pt-4">
+                        {faq.answer}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            ))}
+          </motion.div>
+        </div>
       </section>
 
       {/* FOOTER */}
