@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Loader2, MinusCircle } from 'lucide-react';
 // Removed chatWithAssistant import
+import { auth } from '@/lib/firebase';
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;

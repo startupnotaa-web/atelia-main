@@ -19,6 +19,7 @@ import { OnboardingChecklist } from '@/components/OnboardingChecklist';
 import { useTenant } from '@/lib/TenantProvider';
 import { getGreetings, getTimeGreeting } from '@/utils/greetings';
 import Link from 'next/link';
+import { auth } from '@/lib/firebase';
 
 function TypewriterText({ text }: { text: string }) {
   const [displayed, setDisplayed] = useState('');

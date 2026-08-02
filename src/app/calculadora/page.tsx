@@ -8,7 +8,7 @@ import { collection, addDoc, getDocs, query, where, writeBatch, doc, serverTimes
 import { Plus, Trash2, Save, Calculator, Receipt, DollarSign, Clock, Scissors, Lightbulb, Settings, ShoppingCart, User as UserIcon, ImageIcon, Loader2 } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import { uploadImage } from '@/app/actions/upload-image';
-import { getUserLimits } from '@/lib/checkSubscriptionLimits';
+import { fetchUserLimitsAction } from '@/app/actions/user';
 import LimitModal from '@/components/LimitModal';
 
 interface Material {
@@ -118,8 +118,8 @@ export default function CalculadoraPage() {
         ]);
 
         try {
-          const limits = await getUserLimits(currentUser.uid);
-          setUserLimits(limits);
+          const limitsData = await fetchUserLimitsAction(currentUser.uid);
+          setUserLimits(limitsData);
         } catch (e) {
           console.error(e);
         }

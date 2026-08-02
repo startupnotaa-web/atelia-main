@@ -8,7 +8,7 @@ import { jsPDF } from 'jspdf';
 import { fetchClientsForQuotes, fetchProductsForQuotes, registerPdfGeneration } from '@/app/actions/quotes';
 import type { QuoteClient, QuoteProduct } from '@/app/actions/quotes';
 import toast from 'react-hot-toast';
-import { getUserLimits } from '@/lib/checkSubscriptionLimits';
+import { fetchUserLimitsAction } from '@/app/actions/user';
 import LimitModal from '@/components/LimitModal';
 
 type OrcamentoItem = {
@@ -56,7 +56,7 @@ export default function GerarOrcamento() {
             setCatalog(fetchedProducts);
 
             try {
-              const limits = await getUserLimits(user.uid);
+              const limits = await fetchUserLimitsAction(user.uid);
               setUserLimits(limits);
             } catch (e) {}
 

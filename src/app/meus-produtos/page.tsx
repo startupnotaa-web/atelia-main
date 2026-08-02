@@ -5,7 +5,7 @@ import { db, auth } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Package, Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { getUserLimits } from '@/lib/checkSubscriptionLimits';
+import { fetchUserLimitsAction } from '@/app/actions/user';
 
 type Product = {
   id: string;
@@ -44,8 +44,8 @@ export default function MeusProdutosPage() {
             setProducts(data);
             
             try {
-              const limits = await getUserLimits(user.uid);
-              setUserLimits(limits);
+              const limitsData = await fetchUserLimitsAction(user.uid);
+              setUserLimits(limitsData);
             } catch(e) {}
           } catch (error) {
             console.error("Erro ao buscar produtos:", error);
