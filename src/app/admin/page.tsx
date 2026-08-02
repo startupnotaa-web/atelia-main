@@ -63,7 +63,7 @@ export default function AdminDashboardPage() {
     usersSnapshot.forEach((docSnap) => {
       const data = docSnap.data();
       const userData: UserData = {
-        id: data.id,
+        id: docSnap.id,
         email: data.email || 'Sem e-mail',
         plan: data.planType || data.plan || 'free',
         createdAt: data.createdAt || new Date().toISOString(),
