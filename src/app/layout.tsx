@@ -12,6 +12,20 @@ import { Toaster } from "react-hot-toast";
 export const metadata: Metadata = {
   title: "AtelIA",
   description: "A primeira plataforma feita exclusivamente para artesãos e artesãs gerenciarem seus negócios.",
+  icons: {
+    icon: '/icon.png',
+    shortcut: '/favicon.ico',
+    apple: '/apple-icon.png',
+  },
+  openGraph: {
+    images: [{
+      url: '/opengraph-image.png',
+    }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    images: ['/opengraph-image.png'],
+  },
   appleWebApp: {
     capable: true,
     title: 'AtelIA',

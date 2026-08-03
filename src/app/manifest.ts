@@ -7,17 +7,17 @@ export default function manifest(): MetadataRoute.Manifest {
     description: 'Gestão financeira, estoque e precificação inteligente para artesãs.',
     start_url: '/dashboard',
     display: 'standalone',
-    background_color: '#ffffff',
-    theme_color: '#10b981',
+    background_color: '#F7F2EC',
+    theme_color: '#F7F2EC',
     orientation: 'portrait',
     icons: [
       {
-        src: '/icon-192x192.png',
+        src: '/icon.png',
         sizes: '192x192',
         type: 'image/png',
       },
       {
-        src: '/icon-512x512.png',
+        src: '/icon.png',
         sizes: '512x512',
         type: 'image/png',
       },

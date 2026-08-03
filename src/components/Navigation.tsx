@@ -77,11 +77,7 @@ export default function Navigation() {
       <aside className="hidden md:flex flex-col w-[280px] bg-surface border-r border-border h-screen sticky top-0 shadow-sm z-50">
         <div className="p-8 pb-6 border-b border-border">
           <div className="flex items-center gap-2">
-            <svg width="28" height="28" viewBox="0 0 100 100">
-              <rect width="100" height="100" rx="28" fill="var(--color-primary)"></rect>
-              <path d="M23,70 Q38,72 48,58 T74,30" fill="none" stroke="var(--color-background)" strokeWidth="7" strokeLinecap="round" strokeDasharray="1 12"></path>
-              <circle cx="74" cy="30" r="8" fill="var(--color-background)"></circle>
-            </svg>
+            <img src="/icon.png" alt="Logo AtelIA" className="w-7 h-7 object-contain rounded-md" />
             <h1 className="text-2xl font-heading font-bold text-foreground tracking-tight">Atel<span className="text-primary">IA</span></h1>
           </div>
           <p className="text-secondary mt-2 text-xs font-heading font-bold uppercase tracking-widest">Meu Ateliê</p>
@@ -115,11 +111,7 @@ export default function Navigation() {
       {/* Header e Menu para Celular (Mobile) */}
       <header className="md:hidden sticky top-0 left-0 right-0 h-16 bg-surface border-b border-border z-50 shadow-sm flex items-center justify-between px-6">
         <div className="flex items-center gap-2">
-          <svg width="24" height="24" viewBox="0 0 100 100">
-            <rect width="100" height="100" rx="28" fill="var(--color-primary)"></rect>
-            <path d="M23,70 Q38,72 48,58 T74,30" fill="none" stroke="var(--color-background)" strokeWidth="7" strokeLinecap="round" strokeDasharray="1 12"></path>
-            <circle cx="74" cy="30" r="8" fill="var(--color-background)"></circle>
-          </svg>
+          <img src="/icon.png" alt="Logo AtelIA" className="w-6 h-6 object-contain rounded-md" />
           <h1 className="text-xl font-heading font-bold text-foreground tracking-tight">Atel<span className="text-primary">IA</span></h1>
         </div>
         <button 
