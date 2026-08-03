@@ -34,9 +34,9 @@ export async function POST(req: Request) {
     // Fallback unificado helper function
     const executeWithFallback = async (executeFn: (modelName: string) => Promise<any>) => {
       try {
-        return await executeFn("gemini-2.5-flash-lite");
+        return await executeFn("gemini-3.5-flash-lite");
       } catch (error) {
-        console.warn("Fallback: gemini-2.5-flash-lite failed", error);
+        console.warn("Fallback: gemini-3.5-flash-lite failed", error);
         throw new Error('Nossos servidores de IA estão com alta demanda no momento. Por favor, tente novamente em alguns minutos.');
       }
     };
