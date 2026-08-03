@@ -98,10 +98,16 @@ Forneça uma análise rápida e objetiva sobre a saúde financeira. Responda ape
     }
 
     if (type === 'assistente') {
-      const formattedHistory = (history || []).map((msg: any) => ({
+      let formattedHistory = (history || []).map((msg: any) => ({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content }]
       }));
+
+      // A API do Gemini exige que o primeiro item do histórico seja do 'user'
+      while (formattedHistory.length > 0 && formattedHistory[0].role === 'model') {
+        formattedHistory.shift();
+      }
+
       
       const result = await executeWithFallback(async (modelName) => {
         const model = genAI.getGenerativeModel({ 
