@@ -11,10 +11,10 @@ interface RateLimitData {
 
 const rateLimitMap = new Map<string, RateLimitData>();
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // 1. Aplicar Rate Limiting para rotas sensíveis (ex: IA)
   if (request.nextUrl.pathname.startsWith('/api/ai-analysis')) {
-    const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown';
+    const ip = request.headers.get('x-forwarded-for') || 'unknown';
     const now = Date.now();
     const windowMs = 60 * 1000; // 1 minuto
     const maxRequests = 20;
