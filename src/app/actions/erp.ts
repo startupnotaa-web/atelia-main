@@ -2,6 +2,7 @@
 
 import { getAdminDb } from '@/lib/firebase-admin';
 import { revalidatePath } from 'next/cache';
+import { verifyAuth } from '@/lib/verifyAuth';
 
 import { checkProductCreation, incrementProductCount } from '@/lib/checkSubscriptionLimits';
 // ============================================================
@@ -72,7 +73,9 @@ export interface Transaction {
 
 export async function fetchPedidos(userId: string): Promise<Order[]> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
     // Removemos orderBy orderDate porque novos registros podem não ter orderDate, Firebase omitiria esses documentos.
     const snapshot = await db.collection('pedidos').where('userId', '==', userId).get();
@@ -97,7 +100,9 @@ export async function fetchPedidos(userId: string): Promise<Order[]> {
 
 export async function fetchEstoque(userId: string): Promise<StockItem[]> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
     const snapshot = await db.collection('estoque').where('userId', '==', userId).get();
     const estoque = snapshot.docs.map(doc => ({
@@ -114,10 +119,17 @@ export async function fetchEstoque(userId: string): Promise<StockItem[]> {
 
 export async function createPedido(data: Omit<Order, 'id' | 'paidValue' | 'remainingValue'>): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
+    
+    // Sanitização de Inputs
+    if (data.totalValue !== undefined && typeof data.totalValue !== 'number') throw new Error('Valor inválido');
+    if (data.cliente && data.cliente.length > 200) data.cliente = data.cliente.substring(0, 200);
+    if (data.produto && data.produto.length > 200) data.produto = data.produto.substring(0, 200);
+
     const db = getAdminDb();
 
-    if (data.userId) {
-      const perfilDoc = await db.collection('perfis').doc(data.userId).get();
+    if (authUserId) {
+      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
       if (perfilDoc.exists) {
         const plano = perfilDoc.data()?.plano || 'gratis';
         if (plano === 'gratis') {
@@ -127,7 +139,7 @@ export async function createPedido(data: Omit<Order, 'id' | 'paidValue' | 'remai
           const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
           
           const pedidosSnap = await db.collection('pedidos')
-            .where('userId', '==', data.userId)
+            .where('userId', '==', authUserId)
             .where('orderDate', '>=', startOfMonth)
             .where('orderDate', '<=', endOfMonth)
             .get();
@@ -139,13 +151,11 @@ export async function createPedido(data: Omit<Order, 'id' | 'paidValue' | 'remai
       }
     }
 
-    if (!data.userId) throw new Error('Usuário não autenticado');
-
     const novoPedido = {
       ...data,
-      userId: data.userId,
+      userId: authUserId,
       paidValue: 0,
-      remainingValue: data.totalValue,
+      remainingValue: data.totalValue || 0,
     };
     
     const docRef = await db.collection('pedidos').add(novoPedido);
@@ -160,6 +170,9 @@ export async function createPedido(data: Omit<Order, 'id' | 'paidValue' | 'remai
 
 export async function updatePaymentStatus(orderId: string, currentStatus: PaymentStatus, newStatus: PaymentStatus, totalValue: number): Promise<{ success: boolean; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
+    if (typeof totalValue !== 'number' || totalValue < 0 || !isFinite(totalValue)) throw new Error('Valor inválido');
+
     const db = getAdminDb();
     const batch = db.batch();
     const pedidoRef = db.collection('pedidos').doc(orderId);
@@ -167,6 +180,9 @@ export async function updatePaymentStatus(orderId: string, currentStatus: Paymen
     const pedidoDoc = await pedidoRef.get();
     if (!pedidoDoc.exists) {
       return { success: false, error: 'Pedido não encontrado.' };
+    }
+    if (pedidoDoc.data()?.userId !== authUserId) {
+      throw new Error('401 Unauthorized');
     }
 
     let transactionAmount = 0;
@@ -221,9 +237,15 @@ export async function updatePaymentStatus(orderId: string, currentStatus: Paymen
 
 export async function updateProductionStatus(orderId: string, newStatus: ProductionStatus, items: OrderItem[]): Promise<{ success: boolean; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
     const db = getAdminDb();
     const batch = db.batch();
     const pedidoRef = db.collection('pedidos').doc(orderId);
+    
+    const pedidoDoc = await pedidoRef.get();
+    if (!pedidoDoc.exists || pedidoDoc.data()?.userId !== authUserId) {
+      throw new Error('401 Unauthorized');
+    }
     
     batch.update(pedidoRef, {
       productionStatus: newStatus
@@ -259,10 +281,16 @@ export async function updateProductionStatus(orderId: string, newStatus: Product
 
 export async function deletePedido(orderId: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
     const db = getAdminDb();
     const batch = db.batch();
     
     const pedidoRef = db.collection('pedidos').doc(orderId);
+    const pedidoDoc = await pedidoRef.get();
+    if (!pedidoDoc.exists || pedidoDoc.data()?.userId !== authUserId) {
+      throw new Error('401 Unauthorized');
+    }
+
     batch.delete(pedidoRef);
     
     // Deletar as transações financeiras associadas a este pedido para não corromper o financeiro
@@ -282,11 +310,15 @@ export async function deletePedido(orderId: string): Promise<{ success: boolean;
 }
 export async function addCatalogItem(data: any): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
-    if (!data.userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    
+    // Sanitização
+    if (data.price !== undefined && typeof data.price !== 'number') throw new Error('Preço inválido');
+    if (data.name && typeof data.name === 'string' && data.name.length > 200) data.name = data.name.substring(0, 200);
 
     // Integração do Paywall: Verifica se pode criar produto
     try {
-      await checkProductCreation(data.userId);
+      await checkProductCreation(authUserId);
     } catch (e: any) {
       if (e.message.includes('PLAN_LIMIT_REACHED')) {
         return { success: false, error: 'LIMIT_REACHED_PRODUCTS' };
@@ -297,12 +329,12 @@ export async function addCatalogItem(data: any): Promise<{ success: boolean; id?
     const db = getAdminDb();
     const docRef = await db.collection('catalogo').add({
       ...data,
-      userId: data.userId,
+      userId: authUserId,
       createdAt: new Date().toISOString()
     });
 
     // Incrementa contador de produtos criados se for plano Free
-    await incrementProductCount(data.userId);
+    await incrementProductCount(authUserId);
 
     return { success: true, id: docRef.id };
   } catch (error) {
@@ -313,14 +345,20 @@ export async function addCatalogItem(data: any): Promise<{ success: boolean; id?
 
 export async function addStockItem(data: any): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
+    
+    // Sanitização
+    if (data.quantity !== undefined && typeof data.quantity !== 'number') throw new Error('Quantidade inválida');
+    if (data.price !== undefined && typeof data.price !== 'number') throw new Error('Preço inválido');
+
     const db = getAdminDb();
     
-    if (data.userId) {
-      const perfilDoc = await db.collection('perfis').doc(data.userId).get();
+    if (authUserId) {
+      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
       if (perfilDoc.exists) {
         const plano = perfilDoc.data()?.plano || 'gratis';
         if (plano === 'gratis') {
-          const estoqueSnap = await db.collection('estoque').where('userId', '==', data.userId).get();
+          const estoqueSnap = await db.collection('estoque').where('userId', '==', authUserId).get();
           
           let totalStockQuantity = 0;
           estoqueSnap.forEach(doc => {
@@ -335,11 +373,9 @@ export async function addStockItem(data: any): Promise<{ success: boolean; id?: 
       }
     }
 
-    if (!data.userId) throw new Error('Usuário não autenticado');
-
     const docRef = await db.collection('estoque').add({
       ...data,
-      userId: data.userId,
+      userId: authUserId,
       createdAt: new Date().toISOString()
     });
     return { success: true, id: docRef.id };

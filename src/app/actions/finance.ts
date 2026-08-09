@@ -2,6 +2,7 @@
 
 import { getAdminDb } from '@/lib/firebase-admin';
 import { revalidatePath } from 'next/cache';
+import { verifyAuth } from '@/lib/verifyAuth';
 
 // ============================================================
 // TYPES
@@ -23,9 +24,11 @@ export interface FinanceEntry {
 // SERVER ACTIONS
 // ============================================================
 
-export async function fetchFinanceEntries(userId: string, limit = 10): Promise<FinanceEntry[]> {
+export async function fetchFinanceEntries(userId: string, limit: number = 50): Promise<FinanceEntry[]> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
     const snapshot = await db.collection('finance_entries')
       .where('userId', '==', userId)
@@ -45,7 +48,12 @@ export async function fetchFinanceEntries(userId: string, limit = 10): Promise<F
 
 export async function addFinanceEntry(data: Omit<FinanceEntry, 'id' | 'createdAt'>, userId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
+    if (data.value !== undefined && typeof data.value !== 'number') throw new Error('Valor inválido');
+    if (data.description && typeof data.description === 'string' && data.description.length > 200) data.description = data.description.substring(0, 200);
+
     const db = getAdminDb();
     const newEntry = {
       ...data,
@@ -66,7 +74,9 @@ export async function addFinanceEntry(data: Omit<FinanceEntry, 'id' | 'createdAt
 
 export async function fetchInitialBalance(userId: string): Promise<number> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
     const doc = await db.collection('settings').doc(userId).get();
     if (doc.exists) {
@@ -81,7 +91,10 @@ export async function fetchInitialBalance(userId: string): Promise<number> {
 
 export async function updateInitialBalance(newBalance: number, userId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    if (typeof newBalance !== 'number') throw new Error('Valor inválido');
+    
     const db = getAdminDb();
     await db.collection('settings').doc(userId).set({
       initialBalance: newBalance,

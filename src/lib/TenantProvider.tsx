@@ -5,6 +5,7 @@ import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, getRedirectResult } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import type { PronounType } from '@/utils/greetings';
+import { createSessionCookie, removeSessionCookie } from '@/app/actions/auth';
 
 export type PlanType = 'free' | 'pro' | 'gratis' | 'intermediario' | 'profissional';
 
@@ -53,6 +54,11 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (user) {
+        // Sync user token to session cookie
+        user.getIdToken(true).then((idToken) => {
+          createSessionCookie(idToken);
+        });
+
         setUserId(user.uid);
         // Fallback: usa displayName do Firebase Auth
         const authFirstName = user.displayName?.trim().split(/\s+/)[0] || '';
@@ -91,6 +97,8 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         });
       } else {
         // Deslogado
+        removeSessionCookie();
+        
         setUserId(null);
         setCurrentPlanState('free');
         setFirstName('');

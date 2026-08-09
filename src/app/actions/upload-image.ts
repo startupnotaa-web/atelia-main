@@ -1,6 +1,7 @@
 'use server';
 
 import { v2 as cloudinary } from 'cloudinary';
+import { verifyAuth } from '@/lib/verifyAuth';
 
 // O Next.js já injeta as variáveis do .env no process.env
 // A biblioteca Cloudinary pega essas variáveis automaticamente caso sejam nomeadas corretamente.
@@ -13,6 +14,8 @@ cloudinary.config({
 
 export async function uploadImage(formData: FormData) {
   try {
+    await verifyAuth();
+    
     const file = formData.get('file') as File;
     if (!file) {
       throw new Error('Nenhum arquivo enviado.');

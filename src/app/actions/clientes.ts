@@ -2,6 +2,7 @@
 
 import { getAdminDb } from '@/lib/firebase-admin';
 import { revalidatePath } from 'next/cache';
+import { verifyAuth } from '@/lib/verifyAuth';
 
 // ============================================================
 // TYPES
@@ -30,9 +31,11 @@ export interface PointOfSale {
 
 export async function fetchClients(userId: string): Promise<Client[]> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
-    const snapshot = await db.collection('clientes').where('userId', '==', userId).get();
+    const snapshot = await db.collection('clientes').where('userId', '==', authUserId).get();
     
     let clientes = snapshot.docs.map(doc => ({
       id: doc.id,
@@ -55,14 +58,20 @@ export async function fetchClients(userId: string): Promise<Client[]> {
 
 export async function addClient(data: Omit<Client, 'id' | 'createdAt'>): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
+    
+    // Sanitização
+    if (data.name && typeof data.name === 'string' && data.name.length > 200) data.name = data.name.substring(0, 200);
+    if (data.phone && typeof data.phone === 'string' && data.phone.length > 50) data.phone = data.phone.substring(0, 50);
+
     const db = getAdminDb();
     
-    if (data.userId) {
-      const perfilDoc = await db.collection('perfis').doc(data.userId).get();
+    if (authUserId) {
+      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
       if (perfilDoc.exists) {
         const plano = perfilDoc.data()?.plano || 'gratis';
         if (plano === 'gratis') {
-          const clientesSnap = await db.collection('clientes').where('userId', '==', data.userId).get();
+          const clientesSnap = await db.collection('clientes').where('userId', '==', authUserId).get();
           if (clientesSnap.size >= 20) {
             return { success: false, error: 'LIMIT_REACHED_CLIENTS' };
           }
@@ -70,11 +79,9 @@ export async function addClient(data: Omit<Client, 'id' | 'createdAt'>): Promise
       }
     }
 
-    if (!data.userId) throw new Error('Usuário não autenticado');
-
     const newEntry = {
       ...data,
-      userId: data.userId,
+      userId: authUserId,
       createdAt: new Date().toISOString()
     };
     
@@ -89,8 +96,17 @@ export async function addClient(data: Omit<Client, 'id' | 'createdAt'>): Promise
 
 export async function deleteClient(clientId: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
     const db = getAdminDb();
-    await db.collection('clientes').doc(clientId).delete();
+    
+    const clientRef = db.collection('clientes').doc(clientId);
+    const clientDoc = await clientRef.get();
+    
+    if (!clientDoc.exists || clientDoc.data()?.userId !== authUserId) {
+      throw new Error('401 Unauthorized');
+    }
+
+    await clientRef.delete();
     
     revalidatePath('/clientes');
     return { success: true };
@@ -104,9 +120,11 @@ export async function deleteClient(clientId: string): Promise<{ success: boolean
 
 export async function fetchPointsOfSale(userId: string): Promise<PointOfSale[]> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
-    const snapshot = await db.collection('lojas').where('userId', '==', userId).orderBy('createdAt', 'desc').get();
+    const snapshot = await db.collection('lojas').where('userId', '==', authUserId).orderBy('createdAt', 'desc').get();
     
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -120,14 +138,20 @@ export async function fetchPointsOfSale(userId: string): Promise<PointOfSale[]> 
 
 export async function addPointOfSale(data: Omit<PointOfSale, 'id' | 'createdAt'>): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
+    
+    // Sanitização
+    if (data.name && typeof data.name === 'string' && data.name.length > 200) data.name = data.name.substring(0, 200);
+    if (data.commissionPercent !== undefined && typeof data.commissionPercent !== 'number') throw new Error('Comissão inválida');
+
     const db = getAdminDb();
 
-    if (data.userId) {
-      const perfilDoc = await db.collection('perfis').doc(data.userId).get();
+    if (authUserId) {
+      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
       if (perfilDoc.exists) {
         const plano = perfilDoc.data()?.plano || 'gratis';
         if (plano === 'gratis') {
-          const lojasSnap = await db.collection('lojas').where('userId', '==', data.userId).get();
+          const lojasSnap = await db.collection('lojas').where('userId', '==', authUserId).get();
           if (lojasSnap.size >= 1) {
             return { success: false, error: 'LIMIT_REACHED_STORES' };
           }
@@ -135,11 +159,9 @@ export async function addPointOfSale(data: Omit<PointOfSale, 'id' | 'createdAt'>
       }
     }
 
-    if (!data.userId) throw new Error('Usuário não autenticado');
-
     const newEntry = {
       ...data,
-      userId: data.userId,
+      userId: authUserId,
       createdAt: new Date().toISOString()
     };
     
@@ -154,8 +176,17 @@ export async function addPointOfSale(data: Omit<PointOfSale, 'id' | 'createdAt'>
 
 export async function deletePointOfSale(posId: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const authUserId = await verifyAuth();
     const db = getAdminDb();
-    await db.collection('lojas').doc(posId).delete();
+    
+    const posRef = db.collection('lojas').doc(posId);
+    const posDoc = await posRef.get();
+    
+    if (!posDoc.exists || posDoc.data()?.userId !== authUserId) {
+      throw new Error('401 Unauthorized');
+    }
+
+    await posRef.delete();
     
     revalidatePath('/clientes');
     return { success: true };

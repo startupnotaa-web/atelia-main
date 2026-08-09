@@ -2,6 +2,7 @@
 
 import { getAdminDb } from '@/lib/firebase-admin';
 import { DashboardData } from '@/lib/dashboard';
+import { verifyAuth } from '@/lib/verifyAuth';
 import { Order } from './erp';
 import { FinanceEntry } from './finance';
 
@@ -13,11 +14,10 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
   };
 
   try {
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+
     const db = getAdminDb();
-    
-    if (!userId) {
-      throw new Error('Usuário não autenticado');
-    }
 
     // Fetch collections
     const [pedidosSnap, transactionsSnap, financeSnap, settingsDoc, estoqueSnap, prontaEntregaSnap, userDoc, catalogoSnap] = await Promise.all([

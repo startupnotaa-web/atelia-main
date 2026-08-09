@@ -2,6 +2,7 @@
 
 import { getAdminDb } from '@/lib/firebase-admin';
 import { checkPdfLimit, incrementPdfCount } from '@/lib/checkSubscriptionLimits';
+import { verifyAuth } from '@/lib/verifyAuth';
 
 export interface QuoteClient {
   id: string;
@@ -17,7 +18,9 @@ export interface QuoteProduct {
 
 export async function fetchClientsForQuotes(userId: string): Promise<QuoteClient[]> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
     const snapshot = await db.collection('clientes').where('userId', '==', userId).get();
     
@@ -36,8 +39,10 @@ export async function fetchClientsForQuotes(userId: string): Promise<QuoteClient
 }
 
 export async function fetchProductsForQuotes(userId: string): Promise<QuoteProduct[]> {
-  if (!userId) return [];
   try {
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+    
     const db = getAdminDb();
     const snapshot = await db.collection('catalogo').where('userId', '==', userId).get();
     
@@ -57,7 +62,8 @@ export async function fetchProductsForQuotes(userId: string): Promise<QuoteProdu
 
 export async function registerPdfGeneration(userId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    if (!userId) throw new Error('Usuário não autenticado');
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
     
     // Verifica limite de PDFs
     try {
