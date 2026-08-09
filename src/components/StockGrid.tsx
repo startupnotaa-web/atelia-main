@@ -26,23 +26,34 @@ export default function StockGrid() {
       if (user) {
         setUserId(user.uid);
         const q = query(collection(db, 'estoque'), where('userId', '==', user.uid));
-        const unsubscribeDb = onSnapshot(q, (snap) => {
-          const items: Material[] = [];
-          snap.forEach(docSnap => {
-            const data = docSnap.data();
-            items.push({
-              id: docSnap.id,
-              nome: data.nome || data.name || 'Sem Nome',
-              unidadeMedida: data.unidadeMedida || data.unit || 'un',
-              custoTotal: data.custoTotal || data.price || data.totalCost || 0,
-              quantidadeTotal: data.quantidadeTotal || data.quantity || data.purchasedQuantity || 0,
-              currentStock: data.currentStock ?? data.quantidadeTotal ?? data.quantity ?? data.purchasedQuantity ?? 0,
-              lowStockAlert: data.lowStockAlert || 0,
-              linkedFinanceEntryId: data.linkedFinanceEntryId || '',
+        const unsubscribeDb = onSnapshot(
+          q,
+          (snap) => {
+            const items: Material[] = [];
+            snap.forEach(docSnap => {
+              const data = docSnap.data();
+              items.push({
+                id: docSnap.id,
+                nome: data.nome || data.name || 'Sem Nome',
+                unidadeMedida: data.unidadeMedida || data.unit || 'un',
+                custoTotal: data.custoTotal || data.price || data.totalCost || 0,
+                quantidadeTotal: data.quantidadeTotal || data.quantity || data.purchasedQuantity || 0,
+                currentStock: data.currentStock ?? data.quantidadeTotal ?? data.quantity ?? data.purchasedQuantity ?? 0,
+                lowStockAlert: data.lowStockAlert || 0,
+                linkedFinanceEntryId: data.linkedFinanceEntryId || '',
+              });
             });
-          });
-          setDbMaterials(items);
-        });
+            setDbMaterials(items);
+          },
+          (error) => {
+            console.error('Erro ao carregar estoque:', error);
+            if (error.code === 'permission-denied') {
+              import('react-hot-toast').then(mod => mod.toast.error('Erro ao carregar dados: Permissão negada'));
+            } else {
+              import('react-hot-toast').then(mod => mod.toast.error('Erro ao carregar estoque.'));
+            }
+          }
+        );
         return () => unsubscribeDb();
       } else {
         setDbMaterials([]);

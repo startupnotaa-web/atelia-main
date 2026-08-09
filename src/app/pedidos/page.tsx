@@ -111,34 +111,44 @@ export default function PedidosPage() {
   const loadRealtimeData = (userId: string) => {
     // Pedidos
     const qPedidos = query(collection(db, 'pedidos'), where('userId', '==', userId));
-    const unsubPedidos = onSnapshot(qPedidos, (snap) => {
-      const p: Order[] = [];
-      snap.forEach(docSnap => {
-        const d = docSnap.data();
-        p.push({
-          id: docSnap.id,
-          cliente: d.cliente || 'balcao',
-          clienteNome: d.clienteNome || d.clientName || 'Cliente Balcão',
-          produtoId: d.produtoId || '',
-          produtoNome: d.produtoNome || d.produto || 'Produto Indefinido',
-          valorFinal: parseFloat(d.valorFinal || d.totalValue || d.valor || 0),
-          dataEntrega: d.dataEntrega || d.deadline || '',
-          statusPagamento: d.statusPagamento || d.paymentStatus || 'pendente',
-          statusProducao: d.statusProducao || d.productionStatus || 'fila',
-          detalhesCalculo: d.detalhesCalculo || null,
-          userId: d.userId,
-          createdAt: d.createdAt
+    const unsubPedidos = onSnapshot(
+      qPedidos,
+      (snap) => {
+        const p: Order[] = [];
+        snap.forEach(docSnap => {
+          const d = docSnap.data();
+          p.push({
+            id: docSnap.id,
+            cliente: d.cliente || 'balcao',
+            clienteNome: d.clienteNome || d.clientName || 'Cliente Balcão',
+            produtoId: d.produtoId || '',
+            produtoNome: d.produtoNome || d.produto || 'Produto Indefinido',
+            valorFinal: parseFloat(d.valorFinal || d.totalValue || d.valor || 0),
+            dataEntrega: d.dataEntrega || d.deadline || '',
+            statusPagamento: d.statusPagamento || d.paymentStatus || 'pendente',
+            statusProducao: d.statusProducao || d.productionStatus || 'fila',
+            detalhesCalculo: d.detalhesCalculo || null,
+            userId: d.userId,
+            createdAt: d.createdAt
+          });
         });
-      });
-      // Sort: Mais novos primeiro
-      p.sort((a, b) => {
-        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
-        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
-        return timeB - timeA;
-      });
-      setOrders(p);
-      setLoading(false);
-    });
+        // Sort: Mais novos primeiro
+        p.sort((a, b) => {
+          const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return timeB - timeA;
+        });
+        setOrders(p);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Erro ao carregar pedidos:', error);
+        if (error.code === 'permission-denied') {
+          import('react-hot-toast').then(mod => mod.toast.error('Erro ao carregar dados: Permissão negada'));
+        }
+        setLoading(false);
+      }
+    );
 
     // Clientes
     const qClientes = query(collection(db, 'clientes'), where('userId', '==', userId));
