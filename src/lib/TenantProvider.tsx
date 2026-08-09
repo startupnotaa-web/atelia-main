@@ -23,6 +23,7 @@ type TenantContextData = {
   productsCount: number;
   switchTenant: (tenantId: string) => void;
   userId: string | null;
+  isLoading: boolean;
   firstName: string;
   pronoun: PronounType;
   displayName: string;
@@ -34,6 +35,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [currentPlan, setCurrentPlanState] = useState<PlanType>('free');
   const [productsCount, setProductsCount] = useState(0);
   const [userId, setUserId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [firstName, setFirstName] = useState('');
   const [pronoun, setPronoun] = useState<PronounType>('ela');
   const [displayName, setDisplayName] = useState('');
@@ -92,8 +94,10 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
             setCurrentPlanState('free');
             localStorage.setItem('@artesas/plan', 'free');
           }
+          setIsLoading(false);
         }, (err) => {
           console.error('Erro na escuta em tempo real do perfil:', err);
+          setIsLoading(false);
         });
       } else {
         // Deslogado
@@ -105,6 +109,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         setPronoun('ela');
         setDisplayName('');
         localStorage.setItem('@artesas/plan', 'free');
+        setIsLoading(false);
       }
     });
 
@@ -168,6 +173,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       incrementProductsCreated,
       productsCount,
       userId,
+      isLoading,
       firstName,
       pronoun,
       displayName
