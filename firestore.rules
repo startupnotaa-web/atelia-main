@@ -9,11 +9,18 @@ service cloud.firestore {
 
     // 2. Isolamento de Usuário (Tenancy) e 3. Validação de Dados (Schema Validation)
     match /users/{userId} {
-      allow read, create, delete: if request.auth != null && request.auth.uid == userId;
+      allow create, delete: if request.auth != null && request.auth.uid == userId;
       allow update: if request.auth != null && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['planType', 'stripeCustomerId', 'usageStats']);
       
-      // Manter acesso de leitura para admin
-      allow read: if request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true);
+      // Permitir leitura se for o próprio usuário, OU se o chamador for um admin (com checagem segura se o doc existe)
+      allow read: if request.auth != null && (
+        request.auth.uid == userId ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true)
+        )
+      );
     }
     
     // Mantido para compatibilidade do código anterior
