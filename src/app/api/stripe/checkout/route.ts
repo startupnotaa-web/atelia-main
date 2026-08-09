@@ -33,6 +33,7 @@ export async function POST(req: Request) {
       customer_email: email || undefined,
       success_url: `${origin}/dashboard?success=true`,
       cancel_url: `${origin}/dashboard?canceled=true`,
+      allow_promotion_codes: true,
       metadata: {
         userId,
       },
