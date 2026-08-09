@@ -12,6 +12,41 @@ interface RateLimitData {
 const rateLimitMap = new Map<string, RateLimitData>();
 
 export function proxy(request: NextRequest) {
+  // 0. Configuração Estrita de CORS
+  const origin = request.headers.get('origin');
+  let isOriginAllowed = false;
+  
+  if (origin) {
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'https://www.atelia.app.br',
+      'https://atelia.app.br'
+    ];
+    
+    // Autoriza localhost, domínios oficiais e subdomínios Vercel gerados pelo projeto
+    const isVercelPreview = origin.endsWith('.vercel.app') && origin.includes('atelia');
+    isOriginAllowed = allowedOrigins.includes(origin) || isVercelPreview;
+
+    if (!isOriginAllowed) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Forbidden', message: 'CORS policy: Origem não autorizada.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+
+  // Resposta rápida para Preflight (OPTIONS)
+  if (request.method === 'OPTIONS') {
+    return new NextResponse(null, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': origin || '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+    });
+  }
+
   // 1. Aplicar Rate Limiting para rotas sensíveis (ex: IA)
   if (request.nextUrl.pathname.startsWith('/api/ai-analysis')) {
     const ip = request.headers.get('x-forwarded-for') || 'unknown';
@@ -48,6 +83,12 @@ export function proxy(request: NextRequest) {
 
   // 2. Aplicação de Headers de Segurança (Helmet equivalente)
   const response = NextResponse.next();
+
+  if (origin && isOriginAllowed) {
+    response.headers.set('Access-Control-Allow-Origin', origin);
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
 
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('X-Content-Type-Options', 'nosniff');
