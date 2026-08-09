@@ -65,6 +65,7 @@ export async function addFinanceEntry(data: Omit<FinanceEntry, 'id' | 'createdAt
     
     // Revalida a dashboard após a inclusão de um dado financeiro
     revalidatePath('/dashboard');
+    revalidatePath('/evolucao');
     return { success: true };
   } catch (error) {
     console.error('Erro no servidor:', error);

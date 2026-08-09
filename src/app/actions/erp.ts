@@ -176,12 +176,10 @@ export async function updatePaymentStatus(orderId: string, currentStatus: Paymen
     const pedidoRef = db.collection('pedidos').doc(orderId);
     
     const pedidoDoc = await pedidoRef.get();
-    if (!pedidoDoc.exists) {
-      return { success: false, error: 'Pedido não encontrado.' };
+    if (!pedidoDoc.exists || pedidoDoc.data()?.userId !== authUserId) {
+      return { success: false, error: 'Pedido não encontrado ou não autorizado.' };
     }
-    if (pedidoDoc.data()?.userId !== authUserId) {
-      throw new Error('401 Unauthorized');
-    }
+
 
     let transactionAmount = 0;
     let transactionType: 'sinal' | 'integral' | 'restante' = 'integral';
@@ -210,6 +208,7 @@ export async function updatePaymentStatus(orderId: string, currentStatus: Paymen
     // Criar a transação financeira
     const transRef = db.collection('transactions').doc();
     batch.set(transRef, {
+      userId: authUserId,
       orderId,
       amount: transactionAmount,
       type: transactionType,
@@ -258,7 +257,7 @@ export async function updateProductionStatus(orderId: string, newStatus: Product
           const estoqueRef = db.collection('estoque').doc(item.id);
           const estoqueDoc = await estoqueRef.get();
           
-          if (estoqueDoc.exists) {
+          if (estoqueDoc.exists && estoqueDoc.data()?.userId === authUserId) {
             const currentQty = estoqueDoc.data()?.quantity || 0;
             const newQty = Math.max(0, currentQty - item.quantity);
             batch.update(estoqueRef, { quantity: newQty });
@@ -292,7 +291,10 @@ export async function deletePedido(orderId: string): Promise<{ success: boolean;
     batch.delete(pedidoRef);
     
     // Deletar as transações financeiras associadas a este pedido para não corromper o financeiro
-    const transSnap = await db.collection('transactions').where('orderId', '==', orderId).get();
+    const transSnap = await db.collection('transactions')
+      .where('orderId', '==', orderId)
+      .where('userId', '==', authUserId)
+      .get();
     transSnap.forEach(doc => {
       batch.delete(doc.ref);
     });
@@ -334,6 +336,8 @@ export async function addCatalogItem(data: any): Promise<{ success: boolean; id?
     // Incrementa contador de produtos criados se for plano Free
     await incrementProductCount(authUserId);
 
+    revalidatePath('/meus-produtos');
+    revalidatePath('/dashboard');
     return { success: true, id: docRef.id };
   } catch (error) {
     console.error('Erro ao adicionar produto no catálogo:', error);
@@ -374,6 +378,9 @@ export async function addStockItem(data: any): Promise<{ success: boolean; id?: 
       userId: authUserId,
       createdAt: new Date().toISOString()
     });
+    
+    revalidatePath('/estoque');
+    revalidatePath('/dashboard');
     return { success: true, id: docRef.id };
   } catch (error) {
     console.error('Erro ao adicionar item no estoque:', error);
