@@ -567,8 +567,8 @@ export default function LandingPage() {
           <div className="flex flex-wrap justify-center gap-8 text-sm font-bold text-secondary">
             <Link href="#planos" className="hover:text-primary transition-colors">Planos</Link>
             <Link href="#" className="hover:text-primary transition-colors">Instagram</Link>
-            <Link href="#" className="hover:text-primary transition-colors">Termos de Uso</Link>
-            <Link href="#" className="hover:text-primary transition-colors">Privacidade</Link>
+            <Link href="/termos-de-uso" className="hover:text-primary transition-colors">Termos de Uso</Link>
+            <Link href="/politica-de-privacidade" className="hover:text-primary transition-colors">Privacidade</Link>
           </div>
           
           <div className="text-sm font-medium text-secondary/60">
