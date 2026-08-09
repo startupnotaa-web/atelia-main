@@ -56,7 +56,8 @@ export default function AdminDashboardPage() {
       const response = await fetch('/api/admin/users', {
         headers: {
           'Authorization': `Bearer ${idToken}`
-        }
+        },
+        cache: 'no-store'
       });
 
       if (!response.ok) {

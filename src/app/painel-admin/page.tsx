@@ -60,7 +60,8 @@ export default function PainelAdminPage() {
       const response = await fetch('/api/admin/users', {
         headers: {
           'Authorization': `Bearer ${idToken}`
-        }
+        },
+        cache: 'no-store'
       });
 
       if (!response.ok) {
