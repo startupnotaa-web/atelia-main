@@ -44,6 +44,23 @@ interface ItemEquipamento {
   custoDesgaste: number;
 }
 
+// Cabeçalho numerado de cada passo — guia a artesã pela ordem de preenchimento.
+function StepHeader({ num, title, subtitle }: { num: number; title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-start gap-4 mb-6">
+      <span className="w-10 h-10 rounded-xl bg-primary text-slate-900 font-black flex items-center justify-center text-xl shrink-0 shadow-sm">
+        {num}
+      </span>
+      <div>
+        <h2 className="text-xl font-black text-slate-800 leading-tight">{title}</h2>
+        {subtitle && <p className="text-sm text-slate-500 font-medium mt-0.5">{subtitle}</p>}
+      </div>
+    </div>
+  );
+}
+
+const inputBase = "w-full px-4 py-3 text-lg font-bold text-slate-800 rounded-xl border-2 border-border bg-surface focus:border-primary focus:outline-none transition-colors placeholder:font-medium placeholder:text-slate-400";
+
 export default function CalculadoraPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -449,7 +466,7 @@ export default function CalculadoraPage() {
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-rose-500"></div>
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
     </div>
   );
 
@@ -462,17 +479,17 @@ export default function CalculadoraPage() {
       <div className="max-w-7xl mx-auto">
         <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
-              <Calculator className="text-rose-500" size={32} />
-              Calculadora de Precificação Inteligente
+            <h1 className="text-3xl md:text-4xl font-black text-foreground flex items-center gap-3 tracking-tight">
+              <Calculator className="text-primary" size={34} />
+              Calculadora de Preço
             </h1>
-            <p className="text-slate-600 mt-2 text-lg">
-              Descubra o preço exato que garante o seu lucro e paga todas as taxas.
+            <p className="text-slate-600 mt-2 text-lg font-medium">
+              Siga os 6 passos e descubra o preço que paga seus custos e garante o seu lucro.
             </p>
           </div>
-          <button 
+          <button
             onClick={() => router.push('/equipamentos')}
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 font-medium rounded-lg hover:bg-indigo-100 transition-colors"
+            className="flex items-center justify-center gap-2 px-4 py-3 bg-surface border-2 border-border text-slate-600 font-bold rounded-xl hover:bg-background hover:text-foreground transition-colors"
           >
             <Settings size={18} />
             Gerenciar Equipamentos
@@ -497,11 +514,9 @@ export default function CalculadoraPage() {
           
           <div className="xl:col-span-8 space-y-6">
             
-            {/* Identificação */}
-            <section className="bg-surface p-6 rounded-2xl shadow-sm border border-border">
-              <h2 className="text-xl font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <Lightbulb className="text-amber-500" size={24} /> Identificação da Peça
-              </h2>
+            {/* Passo 1: Identificação */}
+            <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
+              <StepHeader num={1} title="Qual peça você vai precificar?" subtitle="Dê um nome (e uma foto, se quiser) para identificar a peça." />
               <div className="flex flex-col md:flex-row gap-6 items-start">
                 <div className="w-full md:flex-1">
                   <label className="block text-sm font-bold text-slate-700 mb-2">Nome da Peça</label>
@@ -510,7 +525,7 @@ export default function CalculadoraPage() {
                     value={nomeDaPeca}
                     onChange={(e) => setNomeDaPeca(e.target.value)}
                     placeholder="Ex: Necessaire de Tecido, Vaso de Cerâmica..."
-                    className="w-full px-4 py-3 rounded-xl border border-border focus:ring-2 focus:ring-rose-500"
+                    className={inputBase}
                   />
                 </div>
                 <div>
@@ -518,7 +533,7 @@ export default function CalculadoraPage() {
                   <div className="flex items-center gap-4">
                     <div className="w-16 h-16 bg-slate-100 rounded-xl border-2 border-border flex items-center justify-center overflow-hidden shrink-0 relative">
                       {isUploadingPhoto ? (
-                        <Loader2 className="animate-spin text-rose-500" size={24} />
+                        <Loader2 className="animate-spin text-primary" size={24} />
                       ) : fotoDaPeca ? (
                         <img src={fotoDaPeca} alt="Preview" className="w-full h-full object-cover" />
                       ) : (
@@ -560,57 +575,59 @@ export default function CalculadoraPage() {
               </div>
             </section>
 
-            {/* Mão de Obra Automação Centralizada */}
-            <section className="bg-surface p-6 rounded-2xl shadow-sm border border-border">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
-                <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-                  <Clock className="text-blue-500" size={24} /> Mão de Obra (Pró-labore)
-                </h2>
+            {/* Passo 2: Mão de Obra */}
+            <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-2 mb-2">
+                <StepHeader num={2} title="Quanto tempo você gastou?" subtitle="Seu tempo vale dinheiro — ele entra no preço como mão de obra." />
                 <button
                   onClick={() => router.push('/perfil')}
-                  className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 mt-2 sm:mt-0"
+                  className="text-sm text-slate-500 hover:text-foreground font-bold flex items-center gap-1 shrink-0 bg-background border-2 border-border px-3 py-2 rounded-xl transition-colors"
                 >
-                  <Settings size={16} /> Editar no Perfil
+                  <Settings size={16} /> Editar salário no Perfil
                 </button>
               </div>
-              
-              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+
+              <div className="bg-background p-4 rounded-xl border-2 border-border mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex gap-6">
                   <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Seu Salário / Mês</p>
-                    <p className="text-lg font-bold text-slate-800">{parsedProLabore > 0 ? formatCurrency(parsedProLabore) : 'R$ 0,00'}</p>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Seu Salário / Mês</p>
+                    <p className="text-lg font-black text-slate-800">{parsedProLabore > 0 ? formatCurrency(parsedProLabore) : 'R$ 0,00'}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Carga Horária</p>
-                    <p className="text-lg font-bold text-slate-800">{parsedHorasMes}h / mês</p>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Carga Horária</p>
+                    <p className="text-lg font-black text-slate-800">{parsedHorasMes}h / mês</p>
                   </div>
                 </div>
-                <div className="bg-surface px-4 py-3 rounded-lg border border-blue-200 shadow-sm text-center">
-                  <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1">Custo da sua Hora</p>
-                  <p className="text-xl font-black text-blue-700">{formatCurrency(valorHoraCalculado)}/h</p>
+                <div className="bg-surface px-5 py-3 rounded-xl border-2 border-primary/40 shadow-sm text-center">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Custo da sua Hora</p>
+                  <p className="text-xl font-black text-primary">{formatCurrency(valorHoraCalculado)}/h</p>
                 </div>
               </div>
-              
+
               <div className="pt-2">
-                <label className="block text-sm font-medium text-slate-700 mb-2">Tempo gasto nesta peça específica:</label>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Tempo gasto nesta peça:</label>
                 <div className="flex gap-3">
-                  <input
-                    type="number" min="0" value={tempoHoras} onChange={(e) => setTempoHoras(e.target.value)}
-                    placeholder="Horas" className="flex-1 px-4 py-2 rounded-lg border border-border"
-                  />
-                  <input
-                    type="number" min="0" max="59" value={tempoMinutos} onChange={(e) => setTempoMinutos(e.target.value)}
-                    placeholder="Minutos" className="flex-1 px-4 py-2 rounded-lg border border-border"
-                  />
+                  <div className="flex-1">
+                    <input
+                      type="number" min="0" value={tempoHoras} onChange={(e) => setTempoHoras(e.target.value)}
+                      placeholder="0" className={`${inputBase} text-center text-2xl`}
+                    />
+                    <p className="text-center text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Horas</p>
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      type="number" min="0" max="59" value={tempoMinutos} onChange={(e) => setTempoMinutos(e.target.value)}
+                      placeholder="0" className={`${inputBase} text-center text-2xl`}
+                    />
+                    <p className="text-center text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Minutos</p>
+                  </div>
                 </div>
               </div>
             </section>
 
-            {/* Materiais Integrados ao Estoque */}
-            <section className="bg-surface p-6 rounded-2xl shadow-sm border border-border">
-              <h2 className="text-xl font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <Scissors className="text-emerald-500" size={24} /> Materiais
-              </h2>
+            {/* Passo 3: Materiais */}
+            <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
+              <StepHeader num={3} title="O que você usou para fazer a peça?" subtitle="Escolha do seu estoque (o custo vem sozinho) ou digite manualmente." />
               <div className="space-y-3 mb-4">
                 {materiais.map((mat) => (
                   <div key={mat.id} className="flex flex-col sm:flex-row gap-2 items-start">
@@ -664,16 +681,14 @@ export default function CalculadoraPage() {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setMateriais([...materiais, { id: Date.now().toString(), nome: '', custo: '', quantidade: '1', isEstoque: false, custoUnitario: 0 }])} className="text-emerald-600 font-medium hover:text-emerald-700 flex items-center gap-1">
+              <button onClick={() => setMateriais([...materiais, { id: Date.now().toString(), nome: '', custo: '', quantidade: '1', isEstoque: false, custoUnitario: 0 }])} className="text-foreground font-bold hover:text-primary flex items-center gap-1 bg-background border-2 border-border px-4 py-2.5 rounded-xl transition-colors">
                 <Plus size={18} /> Adicionar Material
               </button>
             </section>
 
-            {/* Ferramentas Integradas */}
-            <section className="bg-surface p-6 rounded-2xl shadow-sm border border-border">
-              <h2 className="text-xl font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <Settings className="text-purple-500" size={24} /> Ferramentas (Desgaste)
-              </h2>
+            {/* Passo 3b: Ferramentas */}
+            <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
+              <StepHeader num={4} title="Usou máquinas ou ferramentas?" subtitle="O desgaste delas também entra no custo. Pule se não usou." />
               <div className="space-y-3 mb-4">
                 {ferramentas.map((fer) => {
                   const vc = parseFloat(fer.valorCompra) || 0;
@@ -737,64 +752,59 @@ export default function CalculadoraPage() {
                   </div>
                 )})}
               </div>
-              <button onClick={() => setFerramentas([...ferramentas, { id: Date.now().toString(), nome: '', valorCompra: '', vidaUtil: '', tempoUso: '', custo: '0' }])} className="text-purple-600 font-medium hover:text-purple-700 flex items-center gap-1">
+              <button onClick={() => setFerramentas([...ferramentas, { id: Date.now().toString(), nome: '', valorCompra: '', vidaUtil: '', tempoUso: '', custo: '0' }])} className="text-foreground font-bold hover:text-primary flex items-center gap-1 bg-background border-2 border-border px-4 py-2.5 rounded-xl transition-colors">
                 <Plus size={18} /> Adicionar Ferramenta
               </button>
             </section>
 
-            {/* Custos Fixos e Embalagens */}
-            <section className="bg-surface p-6 rounded-2xl shadow-sm border border-border">
-              <h2 className="text-xl font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <Receipt className="text-indigo-500" size={24} /> Custos Fixos & Embalagens (Rateio por peça)
-              </h2>
+            {/* Passo 5: Custos Fixos e Embalagens */}
+            <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
+              <StepHeader num={5} title="Custos do ateliê e embalagem" subtitle="Uma parte proporcional do aluguel, luz e internet entra em cada peça." />
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Aluguel (R$)</label>
-                  <input type="number" step="0.01" value={aluguel} onChange={e => setAluguel(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-border" />
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Aluguel (R$)</label>
+                  <input type="number" step="0.01" value={aluguel} onChange={e => setAluguel(e.target.value)} className={inputBase} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Água/Luz (R$)</label>
-                  <input type="number" step="0.01" value={aguaLuz} onChange={e => setAguaLuz(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-border" />
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Água/Luz (R$)</label>
+                  <input type="number" step="0.01" value={aguaLuz} onChange={e => setAguaLuz(e.target.value)} className={inputBase} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Internet (R$)</label>
-                  <input type="number" step="0.01" value={internet} onChange={e => setInternet(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-border" />
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Internet (R$)</label>
+                  <input type="number" step="0.01" value={internet} onChange={e => setInternet(e.target.value)} className={inputBase} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1 text-pink-600">Embalagens (R$)</label>
-                  <input type="number" step="0.01" value={embalagens} onChange={e => setEmbalagens(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-pink-200 focus:ring-pink-500" />
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Embalagens (R$)</label>
+                  <input type="number" step="0.01" value={embalagens} onChange={e => setEmbalagens(e.target.value)} className={inputBase} />
                 </div>
               </div>
             </section>
 
-            {/* Percentuais */}
-            <section className="bg-surface p-6 rounded-2xl shadow-sm border border-border border-l-4 border-l-rose-400">
-              <h2 className="text-xl font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <DollarSign className="text-rose-500" size={24} /> Percentuais (Markup Real)
-              </h2>
-              <p className="text-xs text-slate-500 mb-4">Essas taxas são descontadas do preço final. A matemática de Markup garante que seu lucro seja exatamente o % desejado no fim das contas.</p>
-              
+            {/* Passo 6: Lucro e Taxas */}
+            <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
+              <StepHeader num={6} title="Quanto você quer ganhar?" subtitle="Defina seu lucro e as taxas que você paga. Tudo já entra embutido no preço final." />
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-emerald-600 mb-1">Lucro Desejado (%)</label>
-                  <input type="number" value={margemLucro} onChange={e => setMargemLucro(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50" />
+                  <label className="block text-sm font-black text-success mb-2">Lucro Desejado (%)</label>
+                  <input type="number" value={margemLucro} onChange={e => setMargemLucro(e.target.value)} className={`${inputBase} border-success/40 focus:border-success text-success`} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Maquininha (%)</label>
-                  <input type="number" value={taxaMaquininha} onChange={e => setTaxaMaquininha(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-border" />
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Maquininha (%)</label>
+                  <input type="number" value={taxaMaquininha} onChange={e => setTaxaMaquininha(e.target.value)} className={inputBase} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Plataforma (%)</label>
-                  <input type="number" value={comissaoPlataforma} onChange={e => setComissaoPlataforma(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-border" />
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Plataforma (%)</label>
+                  <input type="number" value={comissaoPlataforma} onChange={e => setComissaoPlataforma(e.target.value)} className={inputBase} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Imposto/MEI (%)</label>
-                  <input type="number" value={imposto} onChange={e => setImposto(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-border" />
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Imposto/MEI (%)</label>
+                  <input type="number" value={imposto} onChange={e => setImposto(e.target.value)} className={inputBase} />
                 </div>
               </div>
-              
+
               {divisorMarkup <= 0 && (
-                <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg">
+                <div className="mt-4 p-4 bg-red-50 border-2 border-red-100 text-red-600 text-sm font-bold rounded-xl">
                   Atenção: A soma das taxas e lucros não pode ser igual ou superior a 100%. Reduza os percentuais.
                 </div>
               )}
@@ -803,64 +813,64 @@ export default function CalculadoraPage() {
           </div>
 
           <div className="xl:col-span-4 relative">
-            <div className="sticky top-8 bg-surface rounded-3xl shadow-xl overflow-hidden border border-border">
-              
-              <div className="bg-slate-800 p-6 text-white text-center">
-                <h2 className="text-xl font-bold mb-1">Simulador de Precificação</h2>
-                <p className="text-slate-300 text-sm font-medium">
+            <div className="sticky top-8 bg-surface rounded-3xl shadow-xl overflow-hidden border-2 border-border">
+
+              <div className="bg-secondary p-6 text-white text-center">
+                <h2 className="text-xl font-black mb-1">Resultado do Preço</h2>
+                <p className="text-white/70 text-sm font-medium truncate">
                   {nomeDaPeca || 'Nova Peça'}
                 </p>
               </div>
 
               <div className="p-6 space-y-5">
-                
-                <div className="space-y-3 pb-4 border-b border-border border-dashed">
-                  <div className="flex justify-between items-center text-sm">
+
+                <div className="space-y-3 pb-4 border-b-2 border-border border-dashed">
+                  <div className="flex justify-between items-center text-sm font-medium">
                     <span className="text-slate-500">Mão de Obra</span>
-                    <span className="font-medium">{formatCurrency(custoMaoDeObra)}</span>
+                    <span className="text-slate-700">{formatCurrency(custoMaoDeObra)}</span>
                   </div>
-                  <div className="flex justify-between items-center text-sm">
+                  <div className="flex justify-between items-center text-sm font-medium">
                     <span className="text-slate-500">Materiais</span>
-                    <span className="font-medium">{formatCurrency(custoMateriais)}</span>
+                    <span className="text-slate-700">{formatCurrency(custoMateriais)}</span>
                   </div>
-                  <div className="flex justify-between items-center text-sm">
+                  <div className="flex justify-between items-center text-sm font-medium">
                     <span className="text-slate-500">Ferramentas</span>
-                    <span className="font-medium">{formatCurrency(custoFerramentas)}</span>
+                    <span className="text-slate-700">{formatCurrency(custoFerramentas)}</span>
                   </div>
-                  <div className="flex justify-between items-center text-sm">
+                  <div className="flex justify-between items-center text-sm font-medium">
                     <span className="text-slate-500">Fixos & Embalagens</span>
-                    <span className="font-medium">{formatCurrency(custoFixoTotal + custoEmbalagens)}</span>
+                    <span className="text-slate-700">{formatCurrency(custoFixoTotal + custoEmbalagens)}</span>
                   </div>
-                  <div className="flex justify-between items-center pt-2 font-semibold">
-                    <span className="text-slate-700">Custo Base Total</span>
-                    <span>{formatCurrency(custoBaseTotal)}</span>
+                  <div className="flex justify-between items-center pt-2 bg-background rounded-xl px-3 py-2.5 border border-border">
+                    <span className="font-black text-slate-700 text-sm uppercase tracking-wider">Custo Total</span>
+                    <span className="font-black text-slate-900 text-lg">{formatCurrency(custoBaseTotal)}</span>
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-br from-rose-500 to-pink-600 text-white p-5 rounded-2xl text-center shadow-lg">
-                  <div className="flex justify-between items-center mb-1 max-w-xs mx-auto">
-                    <span className="block text-rose-100 text-xs uppercase tracking-wider font-semibold">
-                      Preço de Venda Sugerido
+                <div className="bg-primary text-slate-900 p-6 rounded-2xl text-center shadow-lg">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="block text-slate-800/70 text-xs uppercase tracking-wider font-black">
+                      Venda Por
                     </span>
-                    <label className="flex items-center gap-2 cursor-pointer bg-surface/20 px-2 py-1 rounded-lg hover:bg-surface/30 transition-colors">
-                      <span className="text-[10px] text-white font-bold uppercase tracking-wider">Arredondar</span>
-                      <input type="checkbox" className="w-3.5 h-3.5 rounded text-rose-600 focus:ring-rose-500" checked={isRounded} onChange={(e) => setIsRounded(e.target.checked)} />
+                    <label className="flex items-center gap-2 cursor-pointer bg-slate-900/10 px-2.5 py-1.5 rounded-lg hover:bg-slate-900/20 transition-colors">
+                      <span className="text-[10px] font-black uppercase tracking-wider">Arredondar</span>
+                      <input type="checkbox" className="w-4 h-4 rounded accent-secondary" checked={isRounded} onChange={(e) => setIsRounded(e.target.checked)} />
                     </label>
                   </div>
-                  <span className="block text-4xl font-bold mt-2">
+                  <span className="block text-5xl font-black mt-2 tracking-tight">
                     {formatCurrency(precoFinalVenda)}
                   </span>
                 </div>
 
-                <div className="flex justify-between items-center text-emerald-700 bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                  <span className="font-medium text-sm flex items-center gap-2">
-                    <DollarSign size={16} /> Lucro Real ({margem}%)
+                <div className="flex justify-between items-center text-success bg-green-50 p-4 rounded-2xl border-2 border-green-100">
+                  <span className="font-bold text-sm flex items-center gap-2">
+                    <DollarSign size={18} /> Fica no seu bolso ({margem}%)
                   </span>
-                  <span className="font-bold">{formatCurrency(lucroAtelie)}</span>
+                  <span className="font-black text-xl">{formatCurrency(lucroAtelie)}</span>
                 </div>
 
-                <div className="text-xs text-slate-400 text-center pb-2">
-                  As taxas de plataforma, maquininha e impostos (Total: {somaPercentuais - margem}%) já estão embutidas no preço final sugerido.
+                <div className="text-xs text-slate-400 font-medium text-center pb-2">
+                  As taxas de plataforma, maquininha e impostos (Total: {somaPercentuais - margem}%) já estão embutidas no preço sugerido.
                 </div>
                 
                 {userLimits && !userLimits.isPro && (
@@ -875,17 +885,17 @@ export default function CalculadoraPage() {
                   <button
                     onClick={salvarNoCatalogo}
                     disabled={isSaving || divisorMarkup <= 0 || (userLimits && !userLimits.isPro && userLimits.usage.savedProducts >= userLimits.limits.savedProducts)}
-                    className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 px-4 rounded-xl transition-colors disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 bg-secondary hover:bg-secondary-hover text-white font-bold text-lg py-4 px-4 rounded-xl transition-colors disabled:opacity-50 shadow-sm"
                   >
-                    {isSaving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save size={18} /> Salvar no Catálogo</>}
+                    {isSaving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save size={20} /> Salvar no Catálogo</>}
                   </button>
 
                   <button
                     onClick={() => setShowVendaModal(true)}
                     disabled={isSelling || divisorMarkup <= 0}
-                    className="w-full flex items-center justify-center gap-2 bg-rose-50 text-rose-600 hover:bg-rose-100 font-medium py-3 px-4 rounded-xl transition-colors disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 bg-background text-foreground border-2 border-border hover:border-primary hover:text-primary font-bold text-lg py-4 px-4 rounded-xl transition-colors disabled:opacity-50"
                   >
-                    <ShoppingCart size={18} /> Gerar Pedido (Venda)
+                    <ShoppingCart size={20} /> Gerar Pedido (Venda)
                   </button>
                 </div>
                 
@@ -914,7 +924,7 @@ export default function CalculadoraPage() {
                   <select
                     value={nomeCliente}
                     onChange={(e) => setNomeCliente(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-border focus:ring-2 focus:ring-rose-500 bg-surface appearance-none"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-border focus:border-primary focus:outline-none border-2 bg-surface appearance-none"
                   >
                     <option value="Cliente Balcão / Não Cadastrado">Cliente Balcão / Não Cadastrado</option>
                     {clientesDb.map(c => (
@@ -961,7 +971,7 @@ export default function CalculadoraPage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Total:</span>
-                  <span className="font-bold text-rose-600">{formatCurrency(precoFinalVenda)}</span>
+                  <span className="font-black text-primary">{formatCurrency(precoFinalVenda)}</span>
                 </div>
               </div>
 
@@ -976,7 +986,7 @@ export default function CalculadoraPage() {
                 <button
                   type="submit"
                   disabled={isSelling}
-                  className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-medium transition-colors flex justify-center items-center"
+                  className="flex-1 px-4 py-3 bg-primary hover:bg-primary-hover text-slate-900 rounded-xl font-bold transition-colors flex justify-center items-center"
                 >
                   {isSelling ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : 'Confirmar'}
                 </button>

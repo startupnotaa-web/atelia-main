@@ -453,76 +453,104 @@ export default function PedidosPage() {
     );
   }
 
-  const KanbanColumn = ({ title, icon: Icon, colorClass, items, nextStatus, prevStatus }: any) => (
-    <div className="flex flex-col bg-slate-100/50 rounded-2xl border-2 border-border h-[calc(100vh-220px)] overflow-hidden">
-      <div className={`p-4 border-b-2 border-border flex items-center gap-2 ${colorClass}`}>
-        <Icon size={20} className="opacity-80" />
-        <h3 className="font-black tracking-tight">{title} <span className="opacity-60 font-bold ml-1">({items.length})</span></h3>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {items.map((order: Order) => (
-          <div key={order.id} className="bg-surface p-4 rounded-xl shadow-sm border border-border hover:shadow-md transition-shadow group flex flex-col gap-3">
-            <div className="flex justify-between items-start">
-              <div>
-                <h4 className="font-bold text-slate-800 text-base leading-tight">{order.clienteNome}</h4>
-                <p className="text-sm font-medium text-slate-500 mt-0.5 leading-snug">{order.produtoNome}</p>
+  const KanbanColumn = ({ title, icon: Icon, accentBorder, chipClass, items, nextStatus, nextLabel, prevStatus, emptyHint }: any) => {
+    const columnTotal = items.reduce((acc: number, o: Order) => acc + (o.valorFinal || 0), 0);
+    const hoje = new Date().toISOString().split('T')[0];
+
+    return (
+      <div className="flex flex-col bg-slate-100/50 rounded-2xl border-2 border-border overflow-hidden shrink-0 snap-center w-[85vw] sm:w-[340px] xl:w-auto xl:shrink h-[70vh] xl:h-[calc(100vh-230px)]">
+        {/* Cabeçalho da etapa */}
+        <div className={`p-4 bg-surface border-b-4 ${accentBorder} flex items-center justify-between gap-2`}>
+          <div className="flex items-center gap-3 min-w-0">
+            <span className={`p-2.5 rounded-xl shrink-0 ${chipClass}`}>
+              <Icon size={20} />
+            </span>
+            <div className="min-w-0">
+              <h3 className="font-black text-slate-800 tracking-tight leading-tight truncate">{title}</h3>
+              <p className="text-xs font-bold text-slate-400">
+                {items.length} {items.length === 1 ? 'pedido' : 'pedidos'}
+              </p>
+            </div>
+          </div>
+          {columnTotal > 0 && (
+            <span className="text-sm font-black text-success whitespace-nowrap">{formatCurrency(columnTotal)}</span>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {items.map((order: Order) => {
+            const atrasado = !!order.dataEntrega && order.dataEntrega < hoje && order.statusProducao !== 'entregue';
+            return (
+              <div key={order.id} className="bg-surface p-4 rounded-xl shadow-sm border-2 border-border hover:shadow-md hover:border-primary/30 transition-all flex flex-col gap-3">
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <h4 className="font-black text-slate-800 text-base leading-tight truncate">{order.clienteNome}</h4>
+                    <p className="text-sm font-medium text-slate-500 mt-0.5 leading-snug">{order.produtoNome}</p>
+                  </div>
+                  <button onClick={() => handleDelete(order.id)} title="Excluir pedido" className="text-slate-300 hover:text-red-500 transition-colors shrink-0 p-1">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+
+                <div className={`flex items-center gap-2 text-xs font-bold rounded-lg p-2 ${
+                  atrasado ? 'bg-red-50 text-red-600' : 'bg-background text-slate-600'
+                }`}>
+                  <Clock size={14} className={atrasado ? 'text-red-400' : 'text-slate-400'} />
+                  {atrasado ? 'Atrasado! Prazo: ' : 'Prazo: '}
+                  {order.dataEntrega ? new Date(order.dataEntrega + 'T12:00:00').toLocaleDateString('pt-BR') : 'A Combinar'}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-lg font-black text-success">{formatCurrency(order.valorFinal)}</span>
+                  <button
+                    onClick={() => changePaymentStatus(order.id, order.statusPagamento)}
+                    title="Toque para alterar o status de pagamento"
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors ${
+                      order.statusPagamento === 'pago' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' :
+                      order.statusPagamento === 'sinal' ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' :
+                      'bg-red-50 text-red-600 hover:bg-red-100'
+                    }`}
+                  >
+                    {order.statusPagamento === 'pago' ? '✅ Pago 100%' :
+                     order.statusPagamento === 'sinal' ? '⏳ Sinal 50%' : '🔴 Pendente'}
+                  </button>
+                </div>
+
+                {/* Ação principal: avançar etapa com rótulo claro */}
+                {(nextStatus || prevStatus) && (
+                  <div className="flex gap-2 mt-1 pt-3 border-t border-border">
+                    {prevStatus && (
+                      <button
+                        onClick={() => changeProductionStatus(order.id, prevStatus)}
+                        title="Voltar etapa"
+                        className="flex items-center justify-center text-slate-400 hover:text-foreground hover:bg-slate-100 p-2.5 rounded-xl transition-colors shrink-0"
+                      >
+                        <ArrowLeft size={18} />
+                      </button>
+                    )}
+                    {nextStatus && (
+                      <button
+                        onClick={() => changeProductionStatus(order.id, nextStatus)}
+                        className="flex-1 flex items-center justify-center gap-2 text-sm font-black text-slate-900 bg-primary hover:bg-primary-hover py-2.5 rounded-xl transition-colors shadow-sm"
+                      >
+                        {nextLabel} <ArrowRight size={16} />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              <button onClick={() => handleDelete(order.id)} className="text-slate-300 hover:text-red-500 transition-colors shrink-0">
-                <Trash2 size={16} />
-              </button>
+            );
+          })}
+          {items.length === 0 && (
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 p-6 text-center opacity-70">
+              <ClipboardList size={32} className="mb-2" />
+              <p className="text-sm font-bold">{emptyHint || 'Nenhum pedido aqui'}</p>
             </div>
-            
-            <div className="flex items-center gap-2 text-xs font-bold bg-background rounded-lg p-2 text-slate-600">
-              <Clock size={14} className="text-slate-400" />
-              Prazo: {order.dataEntrega ? new Date(order.dataEntrega + 'T12:00:00').toLocaleDateString('pt-BR') : 'A Combinar'}
-            </div>
-
-            <div className="flex items-center justify-between mt-1">
-              <span className="font-black text-success">{formatCurrency(order.valorFinal)}</span>
-              <button 
-                onClick={() => changePaymentStatus(order.id, order.statusPagamento)}
-                className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors ${
-                  order.statusPagamento === 'pago' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' :
-                  order.statusPagamento === 'sinal' ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' :
-                  'bg-red-50 text-red-600 hover:bg-red-100'
-                }`}
-              >
-                {order.statusPagamento === 'pago' ? '✅ Pago 100%' :
-                 order.statusPagamento === 'sinal' ? '⏳ Sinal 50%' : '🔴 Pendente'}
-              </button>
-            </div>
-
-            {/* Ações */}
-            <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-border">
-              {prevStatus ? (
-                <button 
-                  onClick={() => changeProductionStatus(order.id, prevStatus)}
-                  className="flex items-center justify-center gap-1 text-xs font-bold text-slate-500 hover:text-foreground hover:bg-slate-100 py-1.5 rounded-lg transition-colors"
-                >
-                  <ArrowLeft size={14} /> Voltar
-                </button>
-              ) : <div></div>}
-              
-              {nextStatus ? (
-                <button 
-                  onClick={() => changeProductionStatus(order.id, nextStatus)}
-                  className="flex items-center justify-center gap-1 text-xs font-bold text-white bg-secondary hover:bg-secondary-hover py-1.5 rounded-lg transition-colors shadow-sm"
-                >
-                  Avançar <ArrowRight size={14} />
-                </button>
-              ) : <div></div>}
-            </div>
-          </div>
-        ))}
-        {items.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-slate-400 p-6 text-center opacity-70">
-            <ClipboardList size={32} className="mb-2" />
-            <p className="text-sm font-bold">Nenhum pedido aqui</p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-8 font-sans animate-in fade-in duration-500">
@@ -560,23 +588,31 @@ export default function PedidosPage() {
         </div>
       </header>
 
-      {/* Kanban Board */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 pb-10">
-        <KanbanColumn 
-          title="Fila de Espera" icon={ClipboardList} colorClass="bg-slate-200 text-slate-700" 
-          items={fila} nextStatus="producao" prevStatus={null}
+      {/* Kanban Board — rola na horizontal no celular, grade no desktop */}
+      <div className="flex xl:grid xl:grid-cols-4 gap-4 pb-10 overflow-x-auto xl:overflow-x-visible snap-x snap-mandatory xl:snap-none -mx-4 px-4 md:mx-0 md:px-0">
+        <KanbanColumn
+          title="Fila de Espera" icon={ClipboardList}
+          accentBorder="border-b-slate-300" chipClass="bg-slate-100 text-slate-600"
+          items={fila} nextStatus="producao" nextLabel="Iniciar Produção" prevStatus={null}
+          emptyHint="Nenhum pedido esperando. Que tal registrar um novo?"
         />
-        <KanbanColumn 
-          title="Em Produção" icon={Factory} colorClass="bg-blue-100 text-blue-700" 
-          items={producao} nextStatus="finalizado" prevStatus="fila"
+        <KanbanColumn
+          title="Em Produção" icon={Factory}
+          accentBorder="border-b-blue-300" chipClass="bg-blue-100 text-blue-700"
+          items={producao} nextStatus="finalizado" nextLabel="Peça Pronta" prevStatus="fila"
+          emptyHint="Nada sendo produzido agora."
         />
-        <KanbanColumn 
-          title="Finalizados" icon={CheckCircle2} colorClass="bg-emerald-100 text-emerald-700" 
-          items={finalizado} nextStatus="entregue" prevStatus="producao"
+        <KanbanColumn
+          title="Finalizados" icon={CheckCircle2}
+          accentBorder="border-b-emerald-300" chipClass="bg-emerald-100 text-emerald-700"
+          items={finalizado} nextStatus="entregue" nextLabel="Entregar" prevStatus="producao"
+          emptyHint="Nenhuma peça pronta aguardando entrega."
         />
-        <KanbanColumn 
-          title="Entregues / Enviados" icon={Truck} colorClass="bg-purple-100 text-purple-700" 
-          items={entregue} nextStatus={null} prevStatus="finalizado"
+        <KanbanColumn
+          title="Entregues" icon={Truck}
+          accentBorder="border-b-purple-300" chipClass="bg-purple-100 text-purple-700"
+          items={entregue} nextStatus={null} nextLabel={null} prevStatus="finalizado"
+          emptyHint="As entregas concluídas aparecem aqui."
         />
       </div>
 

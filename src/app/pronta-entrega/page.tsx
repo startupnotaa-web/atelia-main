@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { 
-  PackageCheck, Plus, Search, 
-  X, Loader2, Minus
+import {
+  PackageCheck, Plus, Search,
+  X, Loader2, Minus, Trash2
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, increment } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
 
 interface EstoqueProntoItem {
   id: string;
@@ -36,6 +36,8 @@ export default function ProntaEntregaPage() {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<EstoqueProntoItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
   
   // Form State
   const [formProdutoId, setFormProdutoId] = useState('');
@@ -150,6 +152,25 @@ export default function ProntaEntregaPage() {
     }
   };
 
+  const handleDeleteItem = async () => {
+    if (!user || !itemToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'estoque_pronto', itemToDelete.id));
+      toast.success(`"${itemToDelete.nome}" removido da prateleira.`);
+      setItemToDelete(null);
+    } catch (error: any) {
+      console.error(error);
+      if (error?.code === 'permission-denied') {
+        toast.error('Sem permissão para excluir este item.');
+      } else {
+        toast.error('Erro ao excluir. Tente novamente.');
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const adjustQuantity = async (itemId: string, currentQty: number, delta: number) => {
     const newQty = currentQty + delta;
     if (newQty < 0) return;
@@ -210,8 +231,17 @@ export default function ProntaEntregaPage() {
               <div className="bg-secondary/5 p-3 rounded-xl text-foreground">
                 <PackageCheck size={28} />
               </div>
-              <div className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest ${item.quantidadeDisponivel > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
-                {item.quantidadeDisponivel > 0 ? 'Em Estoque' : 'Esgotado'}
+              <div className="flex items-center gap-2">
+                <div className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest ${item.quantidadeDisponivel > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                  {item.quantidadeDisponivel > 0 ? 'Em Estoque' : 'Esgotado'}
+                </div>
+                <button
+                  onClick={() => setItemToDelete(item)}
+                  title="Excluir da prateleira"
+                  className="text-slate-300 hover:text-red-500 transition-colors p-2 hover:bg-red-50 rounded-xl"
+                >
+                  <Trash2 size={18} />
+                </button>
               </div>
             </div>
             
@@ -249,6 +279,38 @@ export default function ProntaEntregaPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Confirmação de Exclusão */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-surface rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-in zoom-in-95 duration-200 border-2 border-border">
+            <h3 className="text-2xl font-black text-red-600 mb-2">Excluir da Prateleira</h3>
+            <p className="text-slate-600 font-medium mb-2">
+              Tem certeza que deseja excluir <strong className="text-slate-900">{itemToDelete.nome}</strong> da pronta-entrega?
+            </p>
+            <p className="text-sm text-slate-500 font-medium mb-6">
+              O produto continua no seu catálogo — apenas as {itemToDelete.quantidadeDisponivel} unidades da prateleira serão removidas. Esta ação não pode ser desfeita.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setItemToDelete(null)}
+                disabled={deleting}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-4 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteItem}
+                disabled={deleting}
+                className="flex-[2] bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {deleting ? <Loader2 size={20} className="animate-spin" /> : <Trash2 size={20} />}
+                Confirmar Exclusão
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Adicionar */}
       {isModalOpen && (

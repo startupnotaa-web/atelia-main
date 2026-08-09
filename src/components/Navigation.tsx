@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Calculator, Package, Users, Settings, Menu, X, FileText, ShoppingBag, Store, Crown, ClipboardList, Sparkles, TrendingUp, PackageCheck } from 'lucide-react';
+import { Home, Calculator, Package, Users, Settings, Menu, X, FileText, ShoppingBag, Store, Crown, ClipboardList, Sparkles, TrendingUp, PackageCheck, ShoppingCart } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth } from '@/lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -57,6 +57,7 @@ export default function Navigation() {
     { name: 'Inteligência Artificial', href: '/ia', icon: Sparkles },
     { name: 'Evolução da Empresa', href: '/evolucao', icon: TrendingUp },
     { name: 'Pedidos', href: '/pedidos', icon: ClipboardList },
+    { name: 'Venda de Balcão', href: '/venda-balcao', icon: ShoppingCart },
     { name: 'Pronta-Entrega', href: '/pronta-entrega', icon: PackageCheck },
     { name: 'Orçamentos', href: '/orcamentos', icon: FileText },
     { name: 'Meus Produtos', href: '/meus-produtos', icon: ShoppingBag },
