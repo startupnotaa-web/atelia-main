@@ -11,7 +11,7 @@ interface RateLimitData {
 
 const rateLimitMap = new Map<string, RateLimitData>();
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   // 0. Configuração Estrita de CORS
   const origin = request.headers.get('origin');
   let isOriginAllowed = false;
@@ -43,6 +43,7 @@ export function proxy(request: NextRequest) {
         'Access-Control-Allow-Origin': origin || '*',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Credentials': 'true',
       },
     });
   }
@@ -88,6 +89,7 @@ export function proxy(request: NextRequest) {
     response.headers.set('Access-Control-Allow-Origin', origin);
     response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    response.headers.set('Access-Control-Allow-Credentials', 'true');
   }
 
   response.headers.set('X-Frame-Options', 'DENY');

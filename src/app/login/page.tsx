@@ -16,6 +16,23 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // 1. Verifica se estamos voltando de um redirecionamento (Google)
+    const checkRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          toast.success('Login com Google realizado!');
+          router.push('/dashboard');
+        }
+      } catch (err: any) {
+        console.error('Erro no retorno do redirecionamento do Google:', err);
+        setError(`Erro ao fazer login: ${err.message || err.code}`);
+        toast.error('Falha no login com Google.');
+      }
+    };
+    checkRedirect();
+
+    // 2. Ouve mudanças normais de estado
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         router.push('/dashboard');
