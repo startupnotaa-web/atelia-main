@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Lock, Loader2, AlertCircle } from 'lucide-react';
 import { auth, googleProvider, db } from '@/lib/firebase';
-import { signInWithEmailAndPassword, signInWithRedirect, getRedirectResult, onAuthStateChanged } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 
@@ -17,32 +17,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // 1. Verifica se estamos voltando de um redirecionamento (Google)
-    const checkRedirect = async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result?.user) {
-          try {
-            await setDoc(doc(db, 'users', result.user.uid), {
-              email: result.user.email,
-              nome: result.user.displayName || 'Usuário Google',
-              updatedAt: new Date().toISOString(),
-            }, { merge: true });
-          } catch (dbErr) {
-            console.error('Erro ao salvar usuário no Firestore:', dbErr);
-          }
-          toast.success('Login com Google realizado!');
-          router.push('/dashboard');
-        }
-      } catch (err: any) {
-        console.error('Erro no retorno do redirecionamento do Google:', err);
-        setError(`Erro ao fazer login: ${err.message || err.code}`);
-        toast.error('Falha no login com Google.');
-      }
-    };
-    checkRedirect();
-
-    // 2. Ouve mudanças normais de estado
+    // Ouve mudanças normais de estado
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         router.push('/dashboard');
@@ -86,10 +61,23 @@ export default function LoginPage() {
 
   const handleGoogleLogin = async () => {
     try {
-      // Usando signInWithRedirect para máxima compatibilidade com PWA/Mobile
-      await signInWithRedirect(auth, googleProvider);
+      // Usando signInWithPopup em vez de Redirect para evitar problemas de CORS e cookies
+      const result = await signInWithPopup(auth, googleProvider);
+      if (result?.user) {
+        try {
+          await setDoc(doc(db, 'users', result.user.uid), {
+            email: result.user.email,
+            nome: result.user.displayName || 'Usuário Google',
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        } catch (dbErr) {
+          console.error('Erro ao salvar usuário no Firestore:', dbErr);
+        }
+        toast.success('Login com Google realizado!');
+        router.push('/dashboard');
+      }
     } catch (error: any) {
-      console.error('Erro ao iniciar redirecionamento do Google:', error);
+      console.error('Erro no popup do Google:', error);
       toast.error('Erro ao conectar com Google. Tente novamente.');
     }
   };
