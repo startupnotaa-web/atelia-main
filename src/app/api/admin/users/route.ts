@@ -23,11 +23,29 @@ export async function GET(request: Request) {
     
     // Fetch all users from Firestore
     const usersSnapshot = await db.collection('users').get();
-    const users: any[] = [];
+    const perfisSnapshot = await db.collection('perfis').get();
     
-    usersSnapshot.forEach(doc => {
-      users.push({ id: doc.id, ...doc.data() });
+    const userMap = new Map();
+    
+    perfisSnapshot.forEach(doc => {
+      userMap.set(doc.id, { 
+        id: doc.id, 
+        email: doc.data().email, 
+        createdAt: doc.data().createdAt,
+        plan: doc.data().plano === 'pro' ? 'pro' : 'free',
+        ...doc.data() 
+      });
     });
+
+    usersSnapshot.forEach(doc => {
+      if (userMap.has(doc.id)) {
+        userMap.set(doc.id, { ...userMap.get(doc.id), ...doc.data() });
+      } else {
+        userMap.set(doc.id, { id: doc.id, ...doc.data() });
+      }
+    });
+
+    const users = Array.from(userMap.values());
     
     return NextResponse.json({ success: true, users });
   } catch (error: any) {
@@ -59,9 +77,12 @@ export async function PATCH(request: Request) {
     }
 
     const db = getAdminDb();
-    const userRef = db.collection('users').doc(userId);
     
-    await userRef.update({ plan, planType: plan });
+    const userRef = db.collection('users').doc(userId);
+    await userRef.set({ plan, planType: plan }, { merge: true });
+    
+    const perfilRef = db.collection('perfis').doc(userId);
+    await perfilRef.set({ plano: plan === 'pro' ? 'pro' : 'gratis' }, { merge: true });
     
     return NextResponse.json({ success: true });
   } catch (error: any) {

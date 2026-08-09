@@ -67,14 +67,12 @@ export async function addClient(data: Omit<Client, 'id' | 'createdAt'>): Promise
     const db = getAdminDb();
     
     if (authUserId) {
-      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
-      if (perfilDoc.exists) {
-        const plano = perfilDoc.data()?.plano || 'gratis';
-        if (plano === 'gratis') {
-          const clientesSnap = await db.collection('clientes').where('userId', '==', authUserId).get();
-          if (clientesSnap.size >= 20) {
-            return { success: false, error: 'LIMIT_REACHED_CLIENTS' };
-          }
+      const { getUserLimits } = await import('@/lib/checkSubscriptionLimits');
+      const limits = await getUserLimits(authUserId);
+      if (!limits.isPro) {
+        const clientesSnap = await db.collection('clientes').where('userId', '==', authUserId).get();
+        if (clientesSnap.size >= 20) {
+          return { success: false, error: 'LIMIT_REACHED_CLIENTS' };
         }
       }
     }
@@ -147,14 +145,12 @@ export async function addPointOfSale(data: Omit<PointOfSale, 'id' | 'createdAt'>
     const db = getAdminDb();
 
     if (authUserId) {
-      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
-      if (perfilDoc.exists) {
-        const plano = perfilDoc.data()?.plano || 'gratis';
-        if (plano === 'gratis') {
-          const lojasSnap = await db.collection('lojas').where('userId', '==', authUserId).get();
-          if (lojasSnap.size >= 1) {
-            return { success: false, error: 'LIMIT_REACHED_STORES' };
-          }
+      const { getUserLimits } = await import('@/lib/checkSubscriptionLimits');
+      const limits = await getUserLimits(authUserId);
+      if (!limits.isPro) {
+        const lojasSnap = await db.collection('lojas').where('userId', '==', authUserId).get();
+        if (lojasSnap.size >= 1) {
+          return { success: false, error: 'LIMIT_REACHED_STORES' };
         }
       }
     }

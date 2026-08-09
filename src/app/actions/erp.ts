@@ -129,24 +129,22 @@ export async function createPedido(data: Omit<Order, 'id' | 'paidValue' | 'remai
     const db = getAdminDb();
 
     if (authUserId) {
-      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
-      if (perfilDoc.exists) {
-        const plano = perfilDoc.data()?.plano || 'gratis';
-        if (plano === 'gratis') {
-          // Calcula data início e fim do mês atual
-          const now = new Date();
-          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-          const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
-          
-          const pedidosSnap = await db.collection('pedidos')
-            .where('userId', '==', authUserId)
-            .where('orderDate', '>=', startOfMonth)
-            .where('orderDate', '<=', endOfMonth)
-            .get();
+      const { getUserLimits } = await import('@/lib/checkSubscriptionLimits');
+      const limits = await getUserLimits(authUserId);
+      if (!limits.isPro) {
+        // Calcula data início e fim do mês atual
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+        
+        const pedidosSnap = await db.collection('pedidos')
+          .where('userId', '==', authUserId)
+          .where('orderDate', '>=', startOfMonth)
+          .where('orderDate', '<=', endOfMonth)
+          .get();
 
-          if (pedidosSnap.size >= 5) {
-            return { success: false, error: 'LIMIT_REACHED_ORDERS' };
-          }
+        if (pedidosSnap.size >= 5) {
+          return { success: false, error: 'LIMIT_REACHED_ORDERS' };
         }
       }
     }
@@ -354,21 +352,19 @@ export async function addStockItem(data: any): Promise<{ success: boolean; id?: 
     const db = getAdminDb();
     
     if (authUserId) {
-      const perfilDoc = await db.collection('perfis').doc(authUserId).get();
-      if (perfilDoc.exists) {
-        const plano = perfilDoc.data()?.plano || 'gratis';
-        if (plano === 'gratis') {
-          const estoqueSnap = await db.collection('estoque').where('userId', '==', authUserId).get();
-          
-          let totalStockQuantity = 0;
-          estoqueSnap.forEach(doc => {
-            totalStockQuantity += doc.data().quantity || 0;
-          });
-          
-          // Check if adding the new item exceeds the limit
-          if (totalStockQuantity + (data.quantity || 0) > 20) {
-            return { success: false, error: 'LIMIT_REACHED_STOCK' };
-          }
+      const { getUserLimits } = await import('@/lib/checkSubscriptionLimits');
+      const limits = await getUserLimits(authUserId);
+      if (!limits.isPro) {
+        const estoqueSnap = await db.collection('estoque').where('userId', '==', authUserId).get();
+        
+        let totalStockQuantity = 0;
+        estoqueSnap.forEach(doc => {
+          totalStockQuantity += doc.data().quantity || 0;
+        });
+        
+        // Check if adding the new item exceeds the limit
+        if (totalStockQuantity + (data.quantity || 0) > 20) {
+          return { success: false, error: 'LIMIT_REACHED_STOCK' };
         }
       }
     }
