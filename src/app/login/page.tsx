@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Lock, Loader2, AlertCircle } from 'lucide-react';
-import { auth, googleProvider } from '@/lib/firebase';
+import { auth, googleProvider, db } from '@/lib/firebase';
 import { signInWithEmailAndPassword, signInWithRedirect, getRedirectResult, onAuthStateChanged } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 
 export default function LoginPage() {
@@ -21,6 +22,15 @@ export default function LoginPage() {
       try {
         const result = await getRedirectResult(auth);
         if (result?.user) {
+          try {
+            await setDoc(doc(db, 'users', result.user.uid), {
+              email: result.user.email,
+              nome: result.user.displayName || 'Usuário Google',
+              updatedAt: new Date().toISOString(),
+            }, { merge: true });
+          } catch (dbErr) {
+            console.error('Erro ao salvar usuário no Firestore:', dbErr);
+          }
           toast.success('Login com Google realizado!');
           router.push('/dashboard');
         }

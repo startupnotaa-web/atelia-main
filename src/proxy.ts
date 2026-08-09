@@ -11,7 +11,7 @@ interface RateLimitData {
 
 const rateLimitMap = new Map<string, RateLimitData>();
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // 0. Configuração Estrita de CORS
   const origin = request.headers.get('origin');
   let isOriginAllowed = false;
@@ -95,6 +95,7 @@ export function middleware(request: NextRequest) {
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  response.headers.set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
 
   return response;
 }
