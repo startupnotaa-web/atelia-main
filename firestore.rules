@@ -1,18 +1,44 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // 1. Bloqueio Global: regra padrão inicial
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Isolamento de Usuário (Tenancy) e 3. Validação de Dados (Schema Validation)
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, create, delete: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['planType', 'stripeCustomerId', 'usageStats']);
+      
+      // Manter acesso de leitura para admin
       allow read: if request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true);
     }
     
+    // Mantido para compatibilidade do código anterior
     match /perfis/{userId} {
       allow read: if true; // Vitrine é pública para leitura
       allow write: if request.auth != null && request.auth.uid == userId;
     }
     
-    match /{collection}/{document=**} {
-      // Permitir acesso apenas se o documento tiver userId igual ao UID do request
+    // 2. Regras de Isolamento de Usuário (Tenancy) para coleções de dados
+    match /products/{documentId} {
+      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+    }
+    
+    match /orders/{documentId} {
+      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+    }
+    
+    match /financeEntries/{documentId} {
+      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+    }
+    
+    match /partnerStores/{documentId} {
       allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
     }
