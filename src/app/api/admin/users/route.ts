@@ -19,6 +19,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Não autorizado.' }, { status: 403 });
     }
 
+    // Pega todos os usuários do Firebase Auth (até 1000)
+    const listUsersResult = await auth.listUsers(1000);
+    const authUsers = listUsersResult.users;
+
     const db = getAdminDb();
     
     // Fetch all users from Firestore
@@ -26,20 +30,47 @@ export async function GET(request: Request) {
     const perfisSnapshot = await db.collection('perfis').get();
     
     const userMap = new Map();
-    
-    perfisSnapshot.forEach(doc => {
-      userMap.set(doc.id, { 
-        id: doc.id, 
-        email: doc.data().email, 
-        createdAt: doc.data().createdAt,
-        plan: doc.data().plano === 'pro' ? 'pro' : 'free',
-        ...doc.data() 
+
+    // 1. Inicializa o mapa com os usuários REAIS do Auth
+    authUsers.forEach(userRecord => {
+      userMap.set(userRecord.uid, {
+        id: userRecord.uid,
+        email: userRecord.email,
+        createdAt: userRecord.metadata.creationTime,
+        displayName: userRecord.displayName,
+        plan: 'free',
+        planType: 'free'
       });
     });
+    
+    // 2. Mescla com os dados da coleção 'perfis'
+    perfisSnapshot.forEach(doc => {
+      if (userMap.has(doc.id)) {
+        userMap.set(doc.id, { 
+          ...userMap.get(doc.id), 
+          plan: doc.data().plano === 'pro' ? 'pro' : 'free',
+          ...doc.data(),
+          email: userMap.get(doc.id).email || doc.data().email // Preserva o email real do Auth
+        });
+      } else {
+        userMap.set(doc.id, { 
+          id: doc.id, 
+          email: doc.data().email, 
+          createdAt: doc.data().createdAt,
+          plan: doc.data().plano === 'pro' ? 'pro' : 'free',
+          ...doc.data() 
+        });
+      }
+    });
 
+    // 3. Mescla com os dados da coleção 'users'
     usersSnapshot.forEach(doc => {
       if (userMap.has(doc.id)) {
-        userMap.set(doc.id, { ...userMap.get(doc.id), ...doc.data() });
+        userMap.set(doc.id, { 
+          ...userMap.get(doc.id), 
+          ...doc.data(),
+          email: userMap.get(doc.id).email || doc.data().email // Preserva o email real do Auth
+        });
       } else {
         userMap.set(doc.id, { id: doc.id, ...doc.data() });
       }

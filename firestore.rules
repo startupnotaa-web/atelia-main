@@ -9,18 +9,15 @@ service cloud.firestore {
 
     // 2. Isolamento de Usuário (Tenancy) e 3. Validação de Dados (Schema Validation)
     match /users/{userId} {
-      allow create, delete: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['planType', 'stripeCustomerId', 'usageStats']);
-      
-      // Permitir leitura se for o próprio usuário, OU se o chamador for um admin (com checagem segura se o doc existe)
-      allow read: if request.auth != null && (
-        request.auth.uid == userId ||
-        (
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true)
-        )
-      );
+      allow read, create, delete: if request.auth != null && request.auth.uid == userId;
+
+      // O próprio usuário pode atualizar seu perfil, mas NUNCA os campos de plano/assinatura
+      // via client SDK — esses só podem ser gravados pelo backend (Admin SDK), a partir do
+      // Painel Admin (/api/admin/users) ou do webhook do Stripe. Sem este bloqueio, qualquer
+      // usuário autenticado poderia se autopromover a PRO direto do console do navegador.
+      allow update: if request.auth != null && request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['planType', 'plan', 'stripeCustomerId', 'usageStats']);
     }
     
     // Mantido para compatibilidade do código anterior
