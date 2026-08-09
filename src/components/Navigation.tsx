@@ -65,7 +65,7 @@ export default function Navigation() {
     { name: 'Estoque', href: '/estoque', icon: Package },
     { name: 'Clientes', href: '/clientes', icon: Users },
     { name: 'Lojas Parceiras', href: '/consignacoes', icon: Store },
-    { name: 'Config. & Vitrine', href: '/perfil', icon: Settings },
+    { name: 'Perfil & Config.', href: '/perfil', icon: Settings },
   ];
 
   const menuItems: MenuItem[] = userEmail === 'davidossantosrochadesouza@gmail.com'

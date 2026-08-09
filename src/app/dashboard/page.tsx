@@ -233,7 +233,7 @@ export default function DashboardPage() {
           </div>
           <h3 className="font-black text-xl text-slate-900 mb-2">{title}</h3>
           <p className="text-sm font-bold text-slate-600 mb-6 max-w-[200px]">Desbloqueie insights valiosos para seu ateliê.</p>
-          <Link href="/minha-conta" className="bg-amber-500 hover:bg-amber-600 text-white font-black py-3 px-8 rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 text-sm uppercase tracking-wide">
+          <Link href="/perfil" className="bg-amber-500 hover:bg-amber-600 text-white font-black py-3 px-8 rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 text-sm uppercase tracking-wide">
             Obter Plano Pro
           </Link>
         </div>

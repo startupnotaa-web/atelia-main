@@ -242,7 +242,7 @@ export default function EquipamentosPage() {
             </p>
             <div className="flex flex-col gap-3">
               <button 
-                onClick={() => router.push('/minha-conta')}
+                onClick={() => router.push('/perfil')}
                 className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold py-3 px-6 rounded-xl transition-transform active:scale-95"
               >
                 Fazer Upgrade para PRO
