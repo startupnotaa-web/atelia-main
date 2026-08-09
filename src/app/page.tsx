@@ -416,7 +416,12 @@ export default function LandingPage() {
               </div>
               <h3 className="text-2xl font-heading font-black mb-2">Plano Pro</h3>
               <p className="text-white/80 font-medium mb-6">O poder completo da Inteligência Artificial.</p>
-              <div className="text-5xl font-heading font-black mb-8">R$ 29,90<span className="text-xl text-white/80 font-medium">/mês</span></div>
+              <div className="mb-8">
+                <div className="text-5xl font-heading font-black">R$ 39,90<span className="text-xl text-white/80 font-medium">/mês</span></div>
+                <p className="text-white/80 font-medium mt-2 text-sm">
+                  ou a partir de <strong className="text-white">R$ 29,90/mês</strong> no plano anual
+                </p>
+              </div>
               
               <ul className="space-y-4 mb-8 flex-1">
                 <li className="flex items-start gap-3">

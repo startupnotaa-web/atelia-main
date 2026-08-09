@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe';
+import { getPlanCycle, STRIPE_PRICE_IDS, type BillingInterval } from '@/config/plans';
+
+// Aliases aceitos por compatibilidade com chamadas antigas do frontend.
+const INTERVAL_ALIASES: Record<string, BillingInterval> = {
+  annual: 'yearly',
+  semestral: 'semiannual',
+  trimestral: 'quarterly',
+  mensal: 'monthly',
+  anual: 'yearly',
+};
 
 export async function POST(req: Request) {
   try {
@@ -10,12 +20,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
     }
 
-    const priceId = interval === 'yearly' 
-      ? process.env.NEXT_PUBLIC_STRIPE_PRICE_YEARLY || 'price_1Tn4ki0bsAMO5UUJRCkl4IR6' 
-      : process.env.NEXT_PUBLIC_STRIPE_PRICE_MONTHLY || 'price_1Tn4ki0bsAMO5UUJ5xS94PFz';
+    const normalizedInterval = (INTERVAL_ALIASES[interval] || interval) as BillingInterval;
+    const cycle = getPlanCycle(normalizedInterval);
+
+    if (!cycle) {
+      return NextResponse.json({ error: `Ciclo de cobrança inválido: ${interval}` }, { status: 400 });
+    }
+
+    const priceId = STRIPE_PRICE_IDS[normalizedInterval];
 
     if (!priceId) {
-      throw new Error('ID de Preço Inválido');
+      console.error(`Price ID não configurado para o ciclo "${normalizedInterval}". Defina a variável de ambiente correspondente.`);
+      return NextResponse.json(
+        { error: 'Este ciclo de cobrança ainda não está disponível. Tente novamente em instantes.' },
+        { status: 500 }
+      );
     }
 
     const origin = req.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -36,10 +55,12 @@ export async function POST(req: Request) {
       allow_promotion_codes: true,
       metadata: {
         userId,
+        billingInterval: normalizedInterval,
       },
       subscription_data: {
         metadata: {
           userId,
+          billingInterval: normalizedInterval,
         },
       },
     });
@@ -48,7 +69,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error('Error creating checkout session:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal Server Error' }, 
+      { error: error.message || 'Internal Server Error' },
       { status: 500 }
     );
   }

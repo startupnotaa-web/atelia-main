@@ -26,7 +26,7 @@ export default function AdminDashboardPage() {
   const [mrr, setMrr] = useState(0);
   const [newSignups, setNewSignups] = useState(0);
 
-  const STANDARD_PRO_PRICE = 29.90; // Exemplo de mensalidade
+  const STANDARD_PRO_PRICE = 39.90; // Valor base da mensalidade PRO
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {

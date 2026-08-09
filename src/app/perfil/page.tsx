@@ -15,6 +15,8 @@ import { useTenant } from '@/lib/TenantProvider';
 import { uploadImage } from '@/app/actions/upload-image';
 import { extractFirstName, getGreetings } from '@/utils/greetings';
 import type { PronounType } from '@/utils/greetings';
+import PricingCycles from '@/components/PricingCycles';
+import type { BillingInterval } from '@/config/plans';
 
 export default function PerfilPage() {
   const router = useRouter();
@@ -257,7 +259,7 @@ export default function PerfilPage() {
     }
   };
 
-  const handleUpgrade = async (interval: 'monthly' | 'yearly') => {
+  const handleUpgrade = async (interval: BillingInterval) => {
     if (!userId) {
       toast.error("Você precisa estar logada para assinar.");
       return;
@@ -265,7 +267,7 @@ export default function PerfilPage() {
 
     setCheckoutLoading(true);
     try {
-      const res = await fetch('/api/checkout', {
+      const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ interval, userId }),
@@ -702,52 +704,20 @@ export default function PerfilPage() {
 
             {/* Upgrade - só mostra se não for Pro */}
             {!isPro && (
-              <div className="bg-gradient-to-br from-secondary to-secondary-hover rounded-3xl shadow-xl p-8 md:p-10 text-white relative overflow-hidden">
-                <div className="absolute -right-8 -top-8 w-48 h-48 bg-surface/5 rounded-full blur-3xl"></div>
-                <div className="absolute -left-4 -bottom-4 w-32 h-32 bg-surface/5 rounded-full blur-2xl"></div>
-                
+              <div className="bg-surface rounded-3xl shadow-sm border-2 border-border p-8 md:p-10 relative overflow-hidden">
+                <div className="absolute -right-8 -top-8 w-48 h-48 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+
                 <div className="relative z-10">
-                  <div className="flex items-center gap-3 mb-6">
+                  <div className="flex items-center gap-3 mb-2">
                     <Sparkles className="text-primary" size={28} />
-                    <h3 className="text-2xl font-black">Desbloqueie o AtelIA Pro</h3>
+                    <h3 className="text-2xl font-black text-slate-900">Desbloqueie o AtelIA Pro</h3>
                   </div>
-                  <p className="text-blue-200 font-medium mb-8 max-w-lg">Acesse relatórios avançados, IA Conselheira ilimitada, gestão de estoque completa e muito mais.</p>
+                  <p className="text-slate-500 font-medium mb-8 max-w-lg">
+                    Acesse relatórios avançados, IA Conselheira ilimitada, gestão de estoque completa e muito mais.
+                    Escolha o ciclo que combina com o seu ateliê:
+                  </p>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Plano Mensal - DESTAQUE */}
-                    <div className="bg-surface/10 backdrop-blur-sm border-2 border-[#FFAA00] rounded-2xl p-6 text-center relative">
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-foreground text-xs font-black px-4 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
-                        Mais Acessível
-                      </div>
-                      <p className="text-blue-200 font-bold text-sm uppercase tracking-wider mb-2 mt-2">Mensal</p>
-                      <p className="text-4xl font-black text-white mb-1">R$ 29,90<span className="text-lg text-blue-200 font-medium">/mês</span></p>
-                      <p className="text-sm text-blue-300 mb-5">Cancele quando quiser.</p>
-                      <button 
-                        onClick={() => handleUpgrade('monthly')}
-                        disabled={checkoutLoading}
-                        className="w-full bg-primary hover:bg-[#FFB833] text-foreground font-black py-4 px-6 rounded-xl transition-all hover:-translate-y-0.5 disabled:opacity-50 text-lg shadow-lg"
-                      >
-                        {checkoutLoading ? 'Redirecionando...' : 'Assinar Mensal'}
-                      </button>
-                    </div>
-
-                    {/* Plano Anual */}
-                    <div className="bg-surface/5 backdrop-blur-sm border-2 border-white/20 rounded-2xl p-6 text-center relative">
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-xs font-black px-4 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
-                        Economize R$ 59,80
-                      </div>
-                      <p className="text-blue-200 font-bold text-sm uppercase tracking-wider mb-2 mt-2">Anual</p>
-                      <p className="text-4xl font-black text-white mb-1">R$ 299,00<span className="text-lg text-blue-200 font-medium">/ano</span></p>
-                      <p className="text-sm text-emerald-300 mb-5">Equivale a R$ 24,91/mês</p>
-                      <button 
-                        onClick={() => handleUpgrade('yearly')}
-                        disabled={checkoutLoading}
-                        className="w-full bg-surface/10 hover:bg-surface/20 text-white font-black py-4 px-6 rounded-xl transition-all hover:-translate-y-0.5 border border-white/30 disabled:opacity-50 text-lg"
-                      >
-                        {checkoutLoading ? 'Redirecionando...' : 'Assinar Anual'}
-                      </button>
-                    </div>
-                  </div>
+                  <PricingCycles onSubscribe={handleUpgrade} loading={checkoutLoading} />
                 </div>
               </div>
             )}
