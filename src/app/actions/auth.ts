@@ -7,7 +7,8 @@ export async function createSessionCookie(idToken: string) {
   const expiresIn = 60 * 60 * 24 * 5 * 1000; // 5 days
   try {
     const sessionCookie = await getAdminAuth().createSessionCookie(idToken, { expiresIn });
-    cookies().set('session', sessionCookie, {
+    const cookieStore = await cookies();
+    cookieStore.set('session', sessionCookie, {
       maxAge: expiresIn / 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -22,5 +23,6 @@ export async function createSessionCookie(idToken: string) {
 }
 
 export async function removeSessionCookie() {
-  cookies().delete('session');
+  const cookieStore = await cookies();
+  cookieStore.delete('session');
 }

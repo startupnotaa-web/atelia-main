@@ -2,7 +2,8 @@ import { cookies } from 'next/headers';
 import { getAdminAuth } from '@/lib/firebase-admin';
 
 export async function verifyAuth() {
-  const sessionCookie = cookies().get('session')?.value;
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get('session')?.value;
 
   if (!sessionCookie) {
     throw new Error('401 Unauthorized');
