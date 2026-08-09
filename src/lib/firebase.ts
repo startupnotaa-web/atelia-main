@@ -18,6 +18,11 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 // Configura o App Check apenas no lado do cliente (navegador)
 if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY) {
   try {
+    // Permite testes no localhost sem bloquear o App Check
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+    }
+    
     initializeAppCheck(app, {
       provider: new ReCaptchaV3Provider(process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY),
       // Ativa atualização automática do token
