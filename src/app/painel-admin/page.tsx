@@ -56,11 +56,22 @@ export default function PainelAdminPage() {
       if (!auth.currentUser) return;
       setError(null);
 
-      const usersSnapshot = await getDocs(collection(db, 'users'));
-      const usersData: AppUser[] = usersSnapshot.docs.map(docSnap => {
-        const d = docSnap.data();
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch('/api/admin/users', {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha ao buscar usuários via API');
+      }
+
+      const { users: fetchedUsers } = await response.json();
+
+      const usersData: AppUser[] = fetchedUsers.map((d: any) => {
         return {
-          id: docSnap.id,
+          id: d.id,
           ...d,
           plan: d.planType || d.plan || 'free',
         } as AppUser;

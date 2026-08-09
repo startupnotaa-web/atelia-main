@@ -51,26 +51,37 @@ export default function AdminDashboardPage() {
   const fetchUsersData = async () => {
     if (!auth.currentUser) return;
 
-    const usersSnapshot = await getDocs(collection(db, 'users'));
-    
-    const loadedUsers: UserData[] = [];
-    let proCount = 0;
-    let recentSignupsCount = 0;
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch('/api/admin/users', {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
 
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      if (!response.ok) {
+        throw new Error('Falha ao buscar usuários via API');
+      }
 
-    usersSnapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      const userData: UserData = {
-        id: docSnap.id,
-        email: data.email || 'Sem e-mail',
-        plan: data.planType || data.plan || 'free',
-        createdAt: data.createdAt || new Date().toISOString(),
-        lastLogin: data.lastLogin
-      };
+      const { users: fetchedUsers } = await response.json();
       
-      loadedUsers.push(userData);
+      const loadedUsers: UserData[] = [];
+      let proCount = 0;
+      let recentSignupsCount = 0;
+
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      fetchedUsers.forEach((data: any) => {
+        const userData: UserData = {
+          id: data.id,
+          email: data.email || 'Sem e-mail',
+          plan: data.planType || data.plan || 'free',
+          createdAt: data.createdAt || new Date().toISOString(),
+          lastLogin: data.lastLogin
+        };
+        
+        loadedUsers.push(userData);
 
       if (userData.plan?.toLowerCase() === 'pro') {
         proCount++;
@@ -82,13 +93,17 @@ export default function AdminDashboardPage() {
       }
     });
     
-    loadedUsers.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      loadedUsers.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    setUsers(loadedUsers);
-    setTotalUsers(loadedUsers.length);
-    setProUsers(proCount);
-    setMrr(proCount * STANDARD_PRO_PRICE);
-    setNewSignups(recentSignupsCount);
+      setUsers(loadedUsers);
+      setTotalUsers(loadedUsers.length);
+      setProUsers(proCount);
+      setMrr(proCount * STANDARD_PRO_PRICE);
+      setNewSignups(recentSignupsCount);
+    } catch (error) {
+      console.error('Erro ao processar dados:', error);
+      throw error;
+    }
   };
 
   const handleTogglePlan = async (userId: string, currentPlan: string) => {
