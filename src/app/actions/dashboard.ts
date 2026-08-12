@@ -178,8 +178,8 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
         if (!produtoMap[data.produto]) produtoMap[data.produto] = { quantidadeVendida: 0, receitaGerada: 0 };
         produtoMap[data.produto].quantidadeVendida += 1;
         produtoMap[data.produto].receitaGerada += v;
-      } else if (data.items) {
-        data.items.forEach(item => {
+      } else if (data.items && Array.isArray(data.items)) {
+        data.items.forEach((item: any) => {
           if (!produtoMap[item.name]) {
             produtoMap[item.name] = { quantidadeVendida: 0, receitaGerada: 0 };
           }
