@@ -12,6 +12,7 @@ import { Toaster } from "react-hot-toast";
 export const metadata: Metadata = {
   title: "AtelIA",
   description: "A primeira plataforma feita exclusivamente para artesãos e artesãs gerenciarem seus negócios.",
+  manifest: "/manifest.json",
   icons: {
     icon: '/icon.png',
     shortcut: '/favicon.ico',
@@ -34,7 +35,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  themeColor: '#C15A34',
+  themeColor: '#F39C12',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
