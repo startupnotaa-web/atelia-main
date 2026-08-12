@@ -13,6 +13,20 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
     return isoDate >= filter.start && isoDate <= filter.end;
   };
 
+  const parseNumber = (val: any) => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string') {
+      let str = val;
+      if (str.includes(',')) {
+        str = str.replace(/\./g, '').replace(',', '.');
+      }
+      const num = parseFloat(str);
+      return isNaN(num) ? 0 : num;
+    }
+    return 0;
+  };
+
   try {
     const authUserId = await verifyAuth();
     if (authUserId !== userId) throw new Error('Não autorizado');
@@ -83,6 +97,7 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
 
     // 4. Process Orders
     let faturamentoBruto = 0;
+    let custoProducaoTotal = 0;
     let aReceber = 0;
     let pedidosPendentes = 0;
     let pedidosFila = 0;
@@ -91,16 +106,17 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
     const produtoMap: Record<string, { quantidadeVendida: number; receitaGerada: number }> = {};
 
     pedidosSnap.forEach(doc => {
-      const data = doc.data() as Order;
+      const data = doc.data() as any;
       data.id = doc.id;
       if (data.createdAt && typeof (data.createdAt as any).toDate === 'function') {
         data.createdAt = (data.createdAt as any).toDate().toISOString();
       }
       
-      const v = Number(data.valorFinal) || Number(data.valor) || Number(data.totalValue) || 0;
+      const v = parseNumber(data.valorFinal) || parseNumber(data.valor) || parseNumber(data.totalValue) || 0;
+      const custo = parseNumber(data.custo) || 0;
       
-      const orderDate = data.data || data.createdAt || '';
-      const orderDeadline = data.deadline || data.data || '';
+      const orderDate = data.data || data.orderDate || data.createdAt || '';
+      const orderDeadline = data.dataEntrega || data.deadline || data.data || data.orderDate || '';
       const orderMonthStr = typeof orderDate === 'string' ? orderDate.substring(0, 7) : '';
 
       const isFaturamentoInRange = isWithinPeriod(orderDate, periodFilter);
@@ -108,6 +124,7 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
 
       if (isFaturamentoInRange) {
         faturamentoBruto += v;
+        custoProducaoTotal += custo;
       }
       
       if (data.status || data.statusProducao || data.statusPagamento) {
@@ -247,7 +264,7 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
     // 6. Calculations
     const recebido = totalReceivedFromOrders + totalManualIncome;
     const saldoCaixa = initialBalance + recebido - totalManualExpense;
-    const lucroLiquido = faturamentoBruto - totalManualExpense;
+    const lucroLiquido = faturamentoBruto - custoProducaoTotal - totalManualExpense;
 
     return {
       plan,
