@@ -2,8 +2,43 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getAdminDb } from '@/lib/firebase-admin';
 
+// Função auxiliar para baixar mídia (áudio) da Meta API
+async function downloadWhatsAppMedia(mediaId: string): Promise<string> {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!accessToken) throw new Error('WHATSAPP_ACCESS_TOKEN ausente');
+
+  try {
+    // Passo A: Obter a URL temporária
+    const metaResponse = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    if (!metaResponse.ok) {
+      throw new Error(`Erro ao buscar meta_id ${mediaId}: ${await metaResponse.text()}`);
+    }
+    
+    const metaData = await metaResponse.json();
+    const mediaUrl = metaData.url;
+
+    // Passo B: Fazer download do arquivo binário usando a URL
+    const mediaResponse = await fetch(mediaUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    if (!mediaResponse.ok) {
+      throw new Error(`Erro no download da mídia: ${await mediaResponse.text()}`);
+    }
+
+    const arrayBuffer = await mediaResponse.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString('base64');
+  } catch (error) {
+    console.error('Falha no download da mídia do WhatsApp:', error);
+    throw error;
+  }
+}
+
 // Função para processamento assíncrono e integração com a IA
-async function processWhatsAppIntent(phone: string, text: string) {
+async function processWhatsAppIntent(phone: string, text?: string, audioMedia?: { data: string, mimeType: string }) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -14,13 +49,25 @@ async function processWhatsAppIntent(phone: string, text: string) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: 'gemini-1.5-flash',
-      systemInstruction: 'Você é a Conselheira AtelIA. O usuário enviará uma mensagem de texto (ex: "vendi uma bolsa por 150"). Você deve analisar a intenção e OBRIGATORIAMENTE retornar um objeto JSON válido com três chaves: intent (podendo ser "REGISTER_SALE", "ADD_EXPENSE", "INQUIRY"), amount (um valor numérico extraído da mensagem, ex: 150.00, obrigatório se for venda ou despesa), e replyText (uma resposta humanizada, curta e acolhedora confirmando a ação para ser enviada no WhatsApp).',
+      systemInstruction: 'Você é a Conselheira AtelIA. O usuário enviará uma mensagem de texto (ex: "vendi uma bolsa por 150") ou um áudio transcrito/processado diretamente. Você deve analisar a intenção e OBRIGATORIAMENTE retornar um objeto JSON válido com três chaves: intent (podendo ser "REGISTER_SALE", "ADD_EXPENSE", "INQUIRY"), amount (um valor numérico extraído da mensagem, ex: 150.00, obrigatório se for venda ou despesa), e replyText (uma resposta humanizada, curta e acolhedora confirmando a ação para ser enviada no WhatsApp).',
       generationConfig: {
         responseMimeType: 'application/json',
       }
     });
 
-    const result = await model.generateContent(text);
+    let result;
+    if (audioMedia) {
+      // Envio de áudio + prompt base no formato multimodal (inlineData)
+      result = await model.generateContent([
+        { inlineData: { data: audioMedia.data, mimeType: audioMedia.mimeType } },
+        { text: 'Analise o áudio enviado e identifique a intenção.' }
+      ]);
+    } else if (text) {
+      result = await model.generateContent(text);
+    } else {
+      throw new Error('Nem texto nem áudio foram fornecidos.');
+    }
+
     const responseText = result.response.text();
     const jsonResponse = JSON.parse(responseText);
 
@@ -141,14 +188,27 @@ export async function POST(request: Request) {
     if (body.object === 'whatsapp_business_account') {
       const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-      // Ignoramos status de mensagens capturando apenas textos
-      if (message && message.type === 'text') {
+      // Ignoramos status de mensagens capturando apenas textos ou áudios
+      if (message && (message.type === 'text' || message.type === 'audio')) {
         const phone = message.from;
-        const text = message.text?.body;
         
-        if (phone && text) {
-          // Processamento pesado/assíncrono não deve bloquear a resposta do webhook
-          processWhatsAppIntent(phone, text).catch(console.error);
+        if (message.type === 'audio') {
+          const mediaId = message.audio?.id;
+          const mimeType = message.audio?.mime_type;
+          
+          if (phone && mediaId && mimeType) {
+            // Baixamos a mídia e chamamos o processWhatsAppIntent sem bloquear o webhook principal
+            downloadWhatsAppMedia(mediaId).then((base64Data) => {
+              processWhatsAppIntent(phone, undefined, { data: base64Data, mimeType }).catch(console.error);
+            }).catch(console.error);
+          }
+        } else if (message.type === 'text') {
+          const text = message.text?.body;
+          
+          if (phone && text) {
+            // Processamento pesado/assíncrono não deve bloquear a resposta do webhook
+            processWhatsAppIntent(phone, text).catch(console.error);
+          }
         }
       }
     }
