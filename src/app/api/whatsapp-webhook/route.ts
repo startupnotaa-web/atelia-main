@@ -1,10 +1,82 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Função stub para processamento assíncrono e preparação para a IA
+// Função para processamento assíncrono e integração com a IA
 async function processWhatsAppIntent(phone: string, text: string) {
-  // Por enquanto apenas executamos um console.log formatado
-  // No próximo passo, isso será conectado ao Gemini e ao Firestore
-  console.log(`[WhatsApp Webhook] Mensagem recebida de ${phone}: "${text}"`);
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY não definida');
+    }
+
+    // 1 e 2. Configuração do SDK do Gemini e Engenharia de Prompt
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+      systemInstruction: 'Você é a Conselheira AtelIA. O usuário enviará uma mensagem de texto (ex: "vendi uma bolsa por 150"). Você deve analisar a intenção e OBRIGATORIAMENTE retornar um objeto JSON válido com duas chaves: intent (podendo ser "REGISTER_SALE", "ADD_EXPENSE", "INQUIRY") e replyText (uma resposta humanizada, curta e acolhedora confirmando a ação para ser enviada no WhatsApp).',
+      generationConfig: {
+        responseMimeType: 'application/json',
+      }
+    });
+
+    const result = await model.generateContent(text);
+    const responseText = result.response.text();
+    
+    const jsonResponse = JSON.parse(responseText);
+
+    // 3. Execução de Ações (O Braço no Firestore)
+    switch (jsonResponse.intent) {
+      case 'REGISTER_SALE':
+        // TODO: Buscar o usuário no Firestore baseado no número de telefone (phone)
+        // TODO: Adicionar uma nova entrada na coleção financeEntries com o valor extraído.
+        console.log(`[Intent] Preparando para registrar venda do número ${phone}`);
+        break;
+      case 'ADD_EXPENSE':
+        // TODO: Lógica para adicionar despesa
+        console.log(`[Intent] Preparando para registrar despesa do número ${phone}`);
+        break;
+      case 'INQUIRY':
+        // TODO: Lógica para dúvidas gerais
+        console.log(`[Intent] Respondendo dúvida do número ${phone}`);
+        break;
+      default:
+        console.log(`[Intent] Intenção desconhecida do número ${phone}: ${jsonResponse.intent}`);
+    }
+
+    // 4. Resposta para o Cliente (WhatsApp Send API)
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+
+    if (!phoneNumberId || !accessToken) {
+      throw new Error('Variáveis de ambiente do WhatsApp ausentes');
+    }
+
+    const replyPayload = {
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'text',
+      text: { body: jsonResponse.replyText },
+    };
+
+    const replyResponse = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(replyPayload),
+    });
+
+    if (!replyResponse.ok) {
+      const errorText = await replyResponse.text();
+      console.error(`Erro ao enviar mensagem via WhatsApp API: ${errorText}`);
+    } else {
+      console.log(`Resposta enviada com sucesso para ${phone}`);
+    }
+
+  } catch (error) {
+    console.error('[WhatsApp Webhook] Erro no processamento assíncrono:', error);
+  }
 }
 
 export async function GET(request: Request) {
