@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getAdminDb } from '@/lib/firebase-admin';
 
 // Função para processamento assíncrono e integração com a IA
 async function processWhatsAppIntent(phone: string, text: string) {
@@ -9,11 +10,11 @@ async function processWhatsAppIntent(phone: string, text: string) {
       throw new Error('GEMINI_API_KEY não definida');
     }
 
-    // 1 e 2. Configuração do SDK do Gemini e Engenharia de Prompt
+    // 1 e 2. Configuração do SDK do Gemini e Engenharia de Prompt (Atualizado)
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: 'gemini-1.5-flash',
-      systemInstruction: 'Você é a Conselheira AtelIA. O usuário enviará uma mensagem de texto (ex: "vendi uma bolsa por 150"). Você deve analisar a intenção e OBRIGATORIAMENTE retornar um objeto JSON válido com duas chaves: intent (podendo ser "REGISTER_SALE", "ADD_EXPENSE", "INQUIRY") e replyText (uma resposta humanizada, curta e acolhedora confirmando a ação para ser enviada no WhatsApp).',
+      systemInstruction: 'Você é a Conselheira AtelIA. O usuário enviará uma mensagem de texto (ex: "vendi uma bolsa por 150"). Você deve analisar a intenção e OBRIGATORIAMENTE retornar um objeto JSON válido com três chaves: intent (podendo ser "REGISTER_SALE", "ADD_EXPENSE", "INQUIRY"), amount (um valor numérico extraído da mensagem, ex: 150.00, obrigatório se for venda ou despesa), e replyText (uma resposta humanizada, curta e acolhedora confirmando a ação para ser enviada no WhatsApp).',
       generationConfig: {
         responseMimeType: 'application/json',
       }
@@ -21,26 +22,59 @@ async function processWhatsAppIntent(phone: string, text: string) {
 
     const result = await model.generateContent(text);
     const responseText = result.response.text();
-    
     const jsonResponse = JSON.parse(responseText);
 
-    // 3. Execução de Ações (O Braço no Firestore)
-    switch (jsonResponse.intent) {
-      case 'REGISTER_SALE':
-        // TODO: Buscar o usuário no Firestore baseado no número de telefone (phone)
-        // TODO: Adicionar uma nova entrada na coleção financeEntries com o valor extraído.
-        console.log(`[Intent] Preparando para registrar venda do número ${phone}`);
-        break;
-      case 'ADD_EXPENSE':
-        // TODO: Lógica para adicionar despesa
-        console.log(`[Intent] Preparando para registrar despesa do número ${phone}`);
-        break;
-      case 'INQUIRY':
-        // TODO: Lógica para dúvidas gerais
-        console.log(`[Intent] Respondendo dúvida do número ${phone}`);
-        break;
-      default:
-        console.log(`[Intent] Intenção desconhecida do número ${phone}: ${jsonResponse.intent}`);
+    const db = getAdminDb();
+
+    // 3. Resolução de Identidade (Quem é a artesã?)
+    // Tenta encontrar pelo campo 'phone' ou 'whatsapp'
+    let userId = null;
+    let usersSnapshot = await db.collection('users').where('phone', '==', phone).get();
+    
+    if (usersSnapshot.empty) {
+      // Fallback para caso esteja salvo no campo whatsapp
+      usersSnapshot = await db.collection('users').where('whatsapp', '==', phone).get();
+    }
+
+    if (usersSnapshot.empty) {
+      // Override na mensagem gerada se não achar o usuário
+      jsonResponse.replyText = 'Desculpe, não encontrei este número cadastrado no AtelIA. Por favor, atualize o seu perfil na plataforma com este número!';
+    } else {
+      userId = usersSnapshot.docs[0].id;
+
+      // 4. Execução de Ações (O Braço no Firestore)
+      switch (jsonResponse.intent) {
+        case 'REGISTER_SALE':
+          if (jsonResponse.amount) {
+            await db.collection('finance_entries').add({
+              userId,
+              amount: Number(jsonResponse.amount),
+              type: 'income',
+              description: 'Venda registrada via WhatsApp',
+              createdAt: new Date(),
+            });
+            console.log(`[Intent] Venda de ${jsonResponse.amount} registrada para ${userId}`);
+          }
+          break;
+        case 'ADD_EXPENSE':
+          if (jsonResponse.amount) {
+            await db.collection('finance_entries').add({
+              userId,
+              amount: Number(jsonResponse.amount),
+              type: 'expense',
+              description: 'Despesa registrada via WhatsApp',
+              createdAt: new Date(),
+            });
+            console.log(`[Intent] Despesa de ${jsonResponse.amount} registrada para ${userId}`);
+          }
+          break;
+        case 'INQUIRY':
+          // Apenas responde a dúvida usando o replyText gerado
+          console.log(`[Intent] Respondendo dúvida de ${userId}`);
+          break;
+        default:
+          console.log(`[Intent] Intenção desconhecida: ${jsonResponse.intent}`);
+      }
     }
 
     // 4. Resposta para o Cliente (WhatsApp Send API)
