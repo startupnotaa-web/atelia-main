@@ -95,10 +95,12 @@ async function processWhatsAppIntent(phone: string, text?: string, audioMedia?: 
           if (jsonResponse.amount) {
             await db.collection('finance_entries').add({
               userId,
-              amount: Number(jsonResponse.amount),
-              type: 'income',
+              value: Number(jsonResponse.amount),
+              type: 'entrada',
+              category: 'WhatsApp',
               description: 'Venda registrada via WhatsApp',
-              createdAt: new Date(),
+              date: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
             });
             console.log(`[Intent] Venda de ${jsonResponse.amount} registrada para ${userId}`);
           }
@@ -107,10 +109,12 @@ async function processWhatsAppIntent(phone: string, text?: string, audioMedia?: 
           if (jsonResponse.amount) {
             await db.collection('finance_entries').add({
               userId,
-              amount: Number(jsonResponse.amount),
-              type: 'expense',
+              value: Number(jsonResponse.amount),
+              type: 'saida',
+              category: 'WhatsApp',
               description: 'Despesa registrada via WhatsApp',
-              createdAt: new Date(),
+              date: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
             });
             console.log(`[Intent] Despesa de ${jsonResponse.amount} registrada para ${userId}`);
           }

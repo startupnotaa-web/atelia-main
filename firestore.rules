@@ -1,8 +1,119 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Dono por ID do documento (users/{uid}, settings/{uid}, perfis/{uid}).
+    function isOwnerDoc(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Dono por campo `userId` no próprio documento.
+    function isOwnerField(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --- Perfil privado (users/{uid}) ---
+    // Fonte da verdade de plano/assinatura. Só a própria usuária lê/escreve
+    // via client SDK; webhooks (Stripe/WhatsApp) usam o Admin SDK e ignoram estas regras.
+    match /users/{uid} {
+      allow read, write: if isOwnerDoc(uid);
+    }
+
+    // --- Configurações (settings/{uid}: saldo inicial etc.) ---
+    match /settings/{uid} {
+      allow read, write: if isOwnerDoc(uid);
+    }
+
+    // --- Perfil público da Vitrine (perfis/{uid}) ---
+    // Leitura pública: a vitrine (/vitrine/[loja]) precisa exibir marca/whatsapp
+    // sem autenticação. Escrita restrita à própria dona do perfil.
+    match /perfis/{uid} {
+      allow read: if true;
+      allow write: if isOwnerDoc(uid);
+    }
+
+    // --- Catálogo (catalogo/{id}) ---
+    // Leitura pública apenas do subconjunto visível na vitrine
+    // (visivelNaVitrine != false replica a regra `!== false` já usada em vitrine.ts:
+    // documentos sem o campo continuam visíveis, só o `false` explícito esconde).
+    // Custo de produção (custoBase) trafega no mesmo documento, mas nunca é lido
+    // pela tela pública — o server action da vitrine expõe só nome/preço/foto.
+    match /catalogo/{id} {
+      allow read: if resource.data.visivelNaVitrine != false || isOwnerField(resource.data.userId);
+      allow update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    // --- Coleções privadas por dono (campo `userId`) ---
+    // Financeiro, estoque, pedidos, clientes, consignação e equipamentos nunca
+    // são lidos publicamente — cada artesã só acessa os próprios documentos.
+    match /finance_entries/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /pedidos/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /transactions/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /estoque/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /estoque_pronto/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /equipamentos/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /clientes/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    // Cadastro de lojas parceiras/consignação. `lojas` e `partnerStores`/
+    // `partnerProducts` coexistem hoje como coleções paralelas (ver
+    // INTEGRATION_BLUEPRINT.md §2.4) — protegidas igualmente até a unificação.
+    match /lojas/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /partnerStores/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    match /partnerProducts/{id} {
+      allow read, update, delete: if isOwnerField(resource.data.userId);
+      allow create: if isOwnerField(request.resource.data.userId);
+    }
+
+    // Feedback enviado pela usuária: pode criar, ninguém lê pelo client SDK
+    // (painel administrativo consulta via Admin SDK, que ignora estas regras).
+    match /userFeedbacks/{id} {
+      allow create: if isOwnerField(request.resource.data.userId);
+      allow read, update, delete: if false;
+    }
+
+    // Qualquer coleção não mapeada explicitamente acima fica fechada por padrão.
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
