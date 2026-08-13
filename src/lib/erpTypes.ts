@@ -92,3 +92,59 @@ export interface Pedido {
   detalhesCalculo?: unknown;
   createdAt: unknown;
 }
+
+// --- Motor de Vendas (src/app/actions/sales.ts) ---
+// Fluxo Transacional Único: todo ponto de entrada de venda (PDV, WhatsApp,
+// Consignação, e futuramente a Calculadora) monta um payload deste formato e
+// chama `registrarVenda()`, em vez de reimplementar seu próprio writeBatch
+// com nomes de campo ligeiramente diferentes (a causa raiz dos gargalos
+// documentados em INTEGRATION_BLUEPRINT.md §2.2/§2.3).
+
+export type OrigemVenda = 'pdv' | 'whatsapp' | 'consignacao' | 'calculadora';
+export type FormaPagamentoVenda = 'dinheiro' | 'pix' | 'cartao' | 'outro';
+
+export interface ItemVenda {
+  /**
+   * Id do documento a decrementar. Omitir quando a venda não referencia
+   * estoque controlado (ex: venda solta registrada por texto no WhatsApp).
+   */
+  estoqueId?: string;
+  /**
+   * Qual coleção o `estoqueId` referencia — decide se o motor decrementa
+   * `currentStock` (coleção `estoque`, insumo) ou `quantidadeDisponivel`
+   * (coleção `estoque_pronto`, peça pronta). Default: `'pronta_entrega'`.
+   */
+  tipoEstoque?: 'insumo' | 'pronta_entrega';
+  nome: string;
+  quantidade: number;
+  precoUnitario: number;
+  /** Custo de produção unitário. Já resolvido pelo chamador — ver nota em `registrarVenda`. */
+  custoUnitario?: number;
+}
+
+export interface RegistrarVendaPayload {
+  userId: string;
+  itens: ItemVenda[];
+  /** Valor final cobrado do cliente (já líquido de desconto). */
+  valorTotal: number;
+  /** Custo total do pedido (produção + qualquer comissão/taxa de canal). */
+  custoTotal: number;
+  formaPagamento: FormaPagamentoVenda;
+  origem: OrigemVenda;
+  clienteNome?: string;
+  /** Nome exibido no pedido; default: nome do item único ou "N itens". */
+  produtoNome?: string;
+  /** Default: 'pago' — o motor assume venda já concluída (PDV/WhatsApp/Consignação). */
+  statusPagamento?: PaymentStatus;
+  /** Default: 'entregue'. */
+  statusProducao?: ProductionStatus;
+  descricaoFinanceira?: string;
+  /** Campos extras específicos da origem (ex: desconto, troco) — mesclados no documento do pedido, fora do contrato canônico. */
+  metadados?: Record<string, unknown>;
+}
+
+export interface RegistrarVendaResult {
+  success: boolean;
+  pedidoId?: string;
+  error?: string;
+}

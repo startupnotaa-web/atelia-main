@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getAdminDb } from '@/lib/firebase-admin';
+import { registrarVenda } from '@/app/actions/sales';
 
 // Função auxiliar para baixar mídia (áudio) da Meta API
 async function downloadWhatsAppMedia(mediaId: string): Promise<string> {
@@ -93,16 +94,27 @@ async function processWhatsAppIntent(phone: string, text?: string, audioMedia?: 
       switch (jsonResponse.intent) {
         case 'REGISTER_SALE':
           if (jsonResponse.amount) {
-            await db.collection('finance_entries').add({
+            // Venda solta, sem itens nem custo conhecidos (a mensagem só diz
+            // o valor) — mesmo assim passa pelo motor único (registrarVenda)
+            // para nascer como pedido pago, igual a qualquer outra venda, em
+            // vez de só uma linha em finance_entries que a Dashboard não
+            // conseguia enxergar antes desta correção (INTEGRATION_BLUEPRINT.md §2.1).
+            const resultado = await registrarVenda({
               userId,
-              value: Number(jsonResponse.amount),
-              type: 'entrada',
-              category: 'WhatsApp',
-              description: 'Venda registrada via WhatsApp',
-              date: new Date().toISOString(),
-              createdAt: new Date().toISOString(),
+              itens: [],
+              valorTotal: Number(jsonResponse.amount),
+              custoTotal: 0,
+              formaPagamento: 'outro',
+              origem: 'whatsapp',
+              produtoNome: 'Venda via WhatsApp',
+              descricaoFinanceira: 'Venda registrada via WhatsApp',
             });
-            console.log(`[Intent] Venda de ${jsonResponse.amount} registrada para ${userId}`);
+            if (!resultado.success) {
+              console.error(`[Intent] Falha ao registrar venda via WhatsApp para ${userId}:`, resultado.error);
+              jsonResponse.replyText = 'Não consegui registrar essa venda agora, tenta de novo em instantes?';
+            } else {
+              console.log(`[Intent] Venda de ${jsonResponse.amount} registrada para ${userId}`);
+            }
           }
           break;
         case 'ADD_EXPENSE':

@@ -18,6 +18,12 @@ export interface FinanceEntry {
   value: number;
   description: string;
   createdAt: string;
+  /**
+   * Presente apenas em entradas geradas por `registrarVenda` (src/app/actions/sales.ts):
+   * marca esta entrada como espelho da receita de um pedido, para agregações
+   * de receita não somarem a mesma venda duas vezes (pedido pago + esta entrada).
+   */
+  pedidoId?: string;
 }
 
 // ============================================================

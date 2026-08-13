@@ -8,10 +8,10 @@ import {
 import { toast } from 'react-hot-toast';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, query, where, onSnapshot, writeBatch, doc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { forceRevalidateDashboard } from '@/app/actions/finance';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { registrarVenda } from '@/app/actions/sales';
 import { applyDiscount, calculateChange, roundCents, DiscountMode } from '@/lib/pricingEngine';
-import { EstoqueProntoItem } from '@/lib/erpTypes';
+import { EstoqueProntoItem, ItemVenda } from '@/lib/erpTypes';
 
 interface CartItem {
   prontoId: string;
@@ -150,15 +150,6 @@ export default function VendaBalcaoPage() {
     setValorRecebido('');
   };
 
-  /**
-   * Fluxo transacional unificado da venda de balcão (um único writeBatch atômico):
-   *  A) Estoque   — baixa a quantidadeDisponivel de cada item; zera → esgotado: true.
-   *  B) Financeiro — o pedido nasce com statusPagamento 'pago' e valorFinal já com
-   *     desconto; a Dashboard soma pedidos pagos como receita recebida (uma segunda
-   *     linha em finance_entries duplicaria o faturamento).
-   *  C) Lucro     — grava custo (produção, vindo da Calculadora via prateleira) e
-   *     lucro líquido no próprio pedido, que é o que a Dashboard usa em lucroLiquido.
-   */
   const finalizarVenda = async () => {
     if (!user || cart.length === 0) return;
 
@@ -175,7 +166,10 @@ export default function VendaBalcaoPage() {
     setSaving(true);
     try {
       // Itens antigos na prateleira podem não ter custoUnitario — busca no catálogo
-      // antes de gravar, para o lucro líquido do pedido não sair inflado.
+      // antes de gravar, para o lucro líquido do pedido não sair inflado. O motor
+      // de vendas (registrarVenda) confia no custo que ele recebe: transações do
+      // Firestore só leem por referência direta, então essa resolução (que
+      // depende de uma query por produtoId) precisa acontecer aqui, antes.
       const custosResolvidos = new Map<string, number>();
       await Promise.all(cart.map(async (item) => {
         if (item.custoUnitario > 0 || !item.produtoId) return;
@@ -194,56 +188,36 @@ export default function VendaBalcaoPage() {
       }));
       const custoTotalFinal = roundCents(cartComCusto.reduce((acc, item) => acc + item.custoUnitario * item.quantidade, 0));
 
-      const batch = writeBatch(db);
+      const itens: ItemVenda[] = cartComCusto.map(item => ({
+        estoqueId: item.prontoId,
+        tipoEstoque: 'pronta_entrega',
+        nome: item.nome,
+        quantidade: item.quantidade,
+        precoUnitario: item.preco,
+        custoUnitario: item.custoUnitario,
+      }));
 
-      // 1. Pedido pago e entregue — é ele que alimenta faturamento, recebido e lucro na Dashboard.
-      const newOrderRef = doc(collection(db, 'pedidos'));
-      batch.set(newOrderRef, {
+      const resultado = await registrarVenda({
         userId: user.uid,
-        cliente: 'balcao',
-        clienteNome: 'Cliente Balcão',
-        produtoId: 'multiplos',
-        produtoNome: cart.length === 1 ? cart[0].nome : `${totalPecas} peças (balcão)`,
-        subtotal,
-        desconto: valorDesconto,
-        descontoModo: valorDesconto > 0 ? descontoModo : null,
-        valorFinal: total,
-        custo: custoTotalFinal,
-        lucro: roundCents(total - custoTotalFinal),
-        dataEntrega: new Date().toISOString().split('T')[0],
-        statusPagamento: 'pago',
-        statusProducao: 'entregue',
+        itens,
+        valorTotal: total,
+        custoTotal: custoTotalFinal,
         formaPagamento,
-        ...(formaPagamento === 'dinheiro' && valorRecebido.trim() !== '' ? {
-          valorRecebido: recebidoNum,
-          troco,
-        } : {}),
-        origem: 'pdv_balcao',
-        items: cartComCusto.map(item => ({
-          id: item.produtoId,
-          produtoId: item.prontoId,
-          name: item.nome,
-          quantity: item.quantidade,
-          price: item.preco,
-          precoOriginal: item.precoOriginal,
-          custoUnitario: item.custoUnitario,
-        })),
-        createdAt: serverTimestamp(),
+        origem: 'pdv',
+        produtoNome: cart.length === 1 ? cart[0].nome : `${totalPecas} peças (balcão)`,
+        metadados: {
+          subtotal,
+          desconto: valorDesconto,
+          descontoModo: valorDesconto > 0 ? descontoModo : null,
+          dataEntrega: new Date().toISOString().split('T')[0],
+          ...(formaPagamento === 'dinheiro' && valorRecebido.trim() !== '' ? { valorRecebido: recebidoNum, troco } : {}),
+        },
       });
 
-      // 2. Baixa atômica na prateleira; zerou → marca esgotado.
-      for (const item of cart) {
-        const prontoAtual = estoquePronto.find(e => e.id === item.prontoId);
-        if (!prontoAtual) continue;
-        const novaQtd = Math.max(0, prontoAtual.quantidadeDisponivel - item.quantidade);
-        batch.update(doc(db, 'estoque_pronto', item.prontoId), {
-          quantidadeDisponivel: novaQtd,
-          esgotado: novaQtd === 0,
-        });
+      if (!resultado.success) {
+        toast.error(resultado.error || 'Erro ao registrar a venda. Tente novamente.');
+        return;
       }
-
-      await batch.commit();
-      forceRevalidateDashboard();
 
       setLastSaleTotal(total);
       limparVenda();

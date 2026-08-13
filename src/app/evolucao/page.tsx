@@ -115,7 +115,12 @@ export default function EvolucaoPage() {
             if (!pedidosAgrupadosPorMes[monthYear]) pedidosAgrupadosPorMes[monthYear] = { receita: 0, despesa: 0 };
             pedidosAgrupadosPorMes[monthYear].despesa += valor;
           }
-        } else if (data.type === 'entrada') {
+        } else if (data.type === 'entrada' && !data.pedidoId) {
+          // Entradas com `pedidoId` são espelho da receita de um pedido
+          // (gravadas por registrarVenda, src/app/actions/sales.ts): o caixa
+          // e a receita dessa venda já foram somados acima, no loop de
+          // "Processar Pedidos" (via `pago`). Somar aqui de novo — em caixa
+          // OU em receita — contaria a mesma venda duas vezes.
           caixaAtual += valor;
           totalReceita += valor;
 

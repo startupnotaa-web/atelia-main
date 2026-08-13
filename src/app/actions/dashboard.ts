@@ -66,8 +66,12 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
       }
       allFinanceEntries.push(data);
       const entryDate = data.date || data.createdAt || '';
-      
-      if (data.type === 'entrada') {
+
+      // Entradas com `pedidoId` são espelho da receita de um pedido (gravadas
+      // por registrarVenda, src/app/actions/sales.ts) — essa receita já é
+      // somada abaixo via `pedidosSnap`/statusPagamento. Somar aqui também
+      // contaria a mesma venda duas vezes em recebido/saldoCaixa.
+      if (data.type === 'entrada' && !data.pedidoId) {
         if (isWithinPeriod(entryDate, periodFilter)) {
           totalManualIncome += data.value;
         }

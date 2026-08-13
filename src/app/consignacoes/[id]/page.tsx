@@ -7,9 +7,12 @@ import { Store, Percent, Plus, ArrowLeft, ShoppingBag, DollarSign, RotateCcw, Ch
 import { useTenant } from '@/lib/TenantProvider';
 import { StoreType } from '../page';
 import { db, auth } from '@/lib/firebase';
-import { collection, query, where, getDocs, writeBatch, doc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { revalidatePathCache } from '@/app/actions/cache';
 import { toast as hotToast } from 'react-hot-toast';
+import { registrarVenda } from '@/app/actions/sales';
+import { roundCents } from '@/lib/pricingEngine';
+import type { ItemVenda } from '@/lib/erpTypes';
 
 type ConsignedItem = {
   id: string;
@@ -24,6 +27,8 @@ type Product = {
   id: string;
   name: string;
   price: number;
+  /** Custo de produção (catalogo.custoBase) — usado para o lucro líquido da venda consignada. */
+  custoBase: number;
 };
 
 export default function StoreDetailsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -97,7 +102,7 @@ export default function StoreDetailsPage({ params }: { params: Promise<{ id: str
             const prodData: Product[] = [];
             prodSnap.forEach((doc) => {
               const p = doc.data();
-              prodData.push({ id: doc.id, name: p.nome, price: p.precoFinal });
+              prodData.push({ id: doc.id, name: p.nome, price: p.precoFinal, custoBase: parseFloat(p.custoBase || p.custo || 0) || 0 });
             });
             setProducts(prodData);
             if (prodData.length > 0) setSelectedProduct(prodData[0]);
@@ -164,56 +169,85 @@ export default function StoreDetailsPage({ params }: { params: Promise<{ id: str
     const qty = parseInt(saleQuantity);
     if (!qty || qty <= 0 || qty > item.quantity) return alert('Quantidade inválida ou maior que o estoque na loja.');
 
-    const totalVenda = qty * item.pricePerUnit;
-    const comissao = totalVenda * ((store?.commissionPercent || 0) / 100);
-    const lucroLiquido = totalVenda - comissao;
-
     const authUser = auth.currentUser;
     if (!authUser) return alert('Faça login primeiro.');
 
+    const totalVenda = qty * item.pricePerUnit;
+    const comissao = totalVenda * ((store?.commissionPercent || 0) / 100);
+
     try {
-      const batch = writeBatch(db);
-
-      // 1. Lançar no Financeiro (Entrada/Receita)
-      const financeRef = doc(collection(db, 'finance_entries'));
-      batch.set(financeRef, {
-        userId: authUser.uid,
-        type: 'entrada',
-        category: 'Venda Consignada',
-        value: lucroLiquido,
-        description: `Venda na loja ${store?.name} - ${qty}x ${item.productName}`,
-        date: new Date().toISOString().split('T')[0],
-        createdAt: new Date().toISOString()
-      });
-
-      // 2. Subtrair do Estoque de Produtos Prontos
+      // Resolve o id do documento em estoque_pronto e o custo de produção
+      // ANTES de chamar o motor de vendas: transações do Firestore só leem
+      // por referência direta, nunca por query — essa busca por produtoId
+      // precisa acontecer aqui fora.
+      let estoqueProntoId: string | undefined;
+      let custoUnitario = 0;
       if (item.productId) {
         const qPronto = query(
-          collection(db, 'estoque_pronto'), 
-          where('userId', '==', authUser.uid), 
+          collection(db, 'estoque_pronto'),
+          where('userId', '==', authUser.uid),
           where('produtoId', '==', item.productId)
         );
         const snap = await getDocs(qPronto);
         if (!snap.empty) {
-          const docId = snap.docs[0].id;
-          const currentQty = snap.docs[0].data().quantidadeDisponivel || 0;
-          const newQty = Math.max(0, currentQty - qty);
-          batch.update(doc(db, 'estoque_pronto', docId), {
-            quantidadeDisponivel: newQty
-          });
+          estoqueProntoId = snap.docs[0].id;
+          custoUnitario = parseFloat(snap.docs[0].data().custoUnitario || 0) || 0;
+        }
+        if (custoUnitario <= 0) {
+          // Prateleira sem custo gravado (item antigo) — cai pro custoBase do catálogo.
+          custoUnitario = products.find(p => p.id === item.productId)?.custoBase || 0;
         }
       }
 
-      // 3. Atualizar o item de consignação na nuvem
-      const itemRef = doc(db, 'partnerProducts', item.id);
-      const newQty = item.quantity - qty;
-      if (newQty <= 0) {
-        batch.delete(itemRef);
-      } else {
-        batch.update(itemRef, { quantity: newQty });
+      const custoProducaoTotal = roundCents(custoUnitario * qty);
+      // O custo desta venda inclui a comissão da loja parceira, não só a
+      // produção — sem isso o "lucro" registrado era só receita-menos-comissão,
+      // ignorando quanto a peça custou pra fazer (INTEGRATION_BLUEPRINT.md §2.5).
+      const custoTotal = roundCents(comissao + custoProducaoTotal);
+      const lucroLiquido = roundCents(totalVenda - custoTotal);
+
+      const itens: ItemVenda[] = estoqueProntoId ? [{
+        estoqueId: estoqueProntoId,
+        tipoEstoque: 'pronta_entrega',
+        nome: item.productName,
+        quantidade: qty,
+        precoUnitario: item.pricePerUnit,
+        custoUnitario,
+      }] : [];
+
+      const resultado = await registrarVenda({
+        userId: authUser.uid,
+        itens,
+        valorTotal: totalVenda,
+        custoTotal,
+        formaPagamento: 'outro',
+        origem: 'consignacao',
+        produtoNome: item.productName,
+        clienteNome: store?.name,
+        descricaoFinanceira: `Venda na loja ${store?.name} - ${qty}x ${item.productName}`,
+        metadados: { comissao, storeId: unwrappedParams.id },
+      });
+
+      if (!resultado.success) {
+        hotToast.error(resultado.error || 'Erro ao registrar a venda.');
+        return;
       }
 
-      await batch.commit();
+      // Atualizar a quantidade exposta nesta loja parceira. Fica fora do
+      // motor de vendas de propósito: é um detalhe de "quantas peças estão
+      // fisicamente nesta loja", sem equivalente em PDV/WhatsApp.
+      const itemRef = doc(db, 'partnerProducts', item.id);
+      const newQty = item.quantity - qty;
+      try {
+        if (newQty <= 0) {
+          await deleteDoc(itemRef);
+        } else {
+          await updateDoc(itemRef, { quantity: newQty });
+        }
+      } catch (e) {
+        console.error('Falha ao atualizar quantidade na loja parceira:', e);
+        hotToast.error('Venda registrada, mas houve um erro ao atualizar a quantidade exposta nesta loja.');
+      }
 
       const updated = items.map(i => {
         if (i.id === item.id) return { ...i, quantity: newQty };
@@ -223,7 +257,7 @@ export default function StoreDetailsPage({ params }: { params: Promise<{ id: str
       setItems(updated);
       setIsSaleModalOpen(null);
       setSaleQuantity('1');
-      
+
       showToast(`💰 Venda Registrada! Lucro Líquido de R$ ${lucroLiquido.toFixed(2)} adicionado à sua Dashboard.`);
       await revalidatePathCache(`/consignacoes/${unwrappedParams.id}`);
     } catch (e) {
