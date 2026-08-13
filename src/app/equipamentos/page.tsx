@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useTenant } from '@/lib/TenantProvider';
 import { Plus, Trash2, Settings, Lock } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
-import { calculateCostPerHour } from '@/lib/pricingEngine';
+import { calculateCostPerHour, calculateUsefulLifeHours } from '@/lib/pricingEngine';
 
 interface Equipamento {
   id: string;
@@ -27,7 +27,10 @@ export default function EquipamentosPage() {
   const [equipamentos, setEquipamentos] = useState<Equipamento[]>([]);
   const [nome, setNome] = useState('');
   const [preco, setPreco] = useState('');
-  const [vidaUtilHoras, setVidaUtilHoras] = useState('');
+  // Inputs "humanos" de durabilidade — convertidos em horas de vida útil nos bastidores.
+  const [anosDurabilidade, setAnosDurabilidade] = useState('');
+  const [diasPorSemana, setDiasPorSemana] = useState('');
+  const [horasPorDia, setHorasPorDia] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
@@ -87,15 +90,19 @@ export default function EquipamentosPage() {
     }
 
     const precoNum = parseFloat(preco);
-    const vidaUtilNum = parseFloat(vidaUtilHoras);
+    const vidaUtilNum = calculateUsefulLifeHours(
+      parseFloat(anosDurabilidade) || 0,
+      parseFloat(diasPorSemana) || 0,
+      parseFloat(horasPorDia) || 0
+    );
 
-    if (!nome.trim() || !preco || !vidaUtilHoras) {
-      toast.error('Preencha o nome, o preço e a vida útil (em horas).');
+    if (!nome.trim() || !preco) {
+      toast.error('Preencha o nome e o preço do equipamento.');
       return;
     }
 
     if (!(vidaUtilNum > 0)) {
-      toast.error('A vida útil precisa ser maior que zero para calcular a depreciação por hora.');
+      toast.error('Preencha a durabilidade estimada: anos, dias por semana e horas por dia.');
       return;
     }
 
@@ -109,6 +116,10 @@ export default function EquipamentosPage() {
         preco: precoNum,
         vidaUtilHoras: vidaUtilNum,
         custoPorHora,
+        // Guardamos também os inputs humanos para reexibição/edição futura.
+        anosDurabilidade: parseFloat(anosDurabilidade) || 0,
+        diasPorSemana: parseFloat(diasPorSemana) || 0,
+        horasPorDia: parseFloat(horasPorDia) || 0,
         userId: user.uid,
         createdAt: new Date().toISOString()
       };
@@ -118,7 +129,9 @@ export default function EquipamentosPage() {
       setEquipamentos([...equipamentos, { id: docRef.id, nome, preco: precoNum, vidaUtilHoras: vidaUtilNum, custoPorHora }]);
       setNome('');
       setPreco('');
-      setVidaUtilHoras('');
+      setAnosDurabilidade('');
+      setDiasPorSemana('');
+      setHorasPorDia('');
       toast.success('Equipamento salvo com sucesso!', { id: loadingToast });
     } catch (error) {
       console.error('Erro ao salvar:', error);
@@ -203,23 +216,63 @@ export default function EquipamentosPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Vida Útil (horas de uso)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={vidaUtilHoras}
-                    onChange={(e) => setVidaUtilHoras(e.target.value)}
-                    placeholder="Ex: 10000"
-                    className="w-full px-4 py-2.5 rounded-xl border border-border focus:ring-2 focus:ring-indigo-500 transition-colors"
-                  />
+                  <p className="text-sm font-medium text-slate-700 mb-2">Quanto tempo essa máquina deve durar?</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={anosDurabilidade}
+                        onChange={(e) => setAnosDurabilidade(e.target.value)}
+                        placeholder="5"
+                        className="w-full px-3 py-2.5 rounded-xl border border-border focus:ring-2 focus:ring-indigo-500 transition-colors text-center"
+                      />
+                      <p className="text-[10px] font-bold text-slate-400 text-center mt-1 uppercase tracking-wide">Anos</p>
+                    </div>
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        max="7"
+                        step="1"
+                        value={diasPorSemana}
+                        onChange={(e) => setDiasPorSemana(e.target.value)}
+                        placeholder="5"
+                        className="w-full px-3 py-2.5 rounded-xl border border-border focus:ring-2 focus:ring-indigo-500 transition-colors text-center"
+                      />
+                      <p className="text-[10px] font-bold text-slate-400 text-center mt-1 uppercase tracking-wide">Dias/semana</p>
+                    </div>
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        step="0.5"
+                        value={horasPorDia}
+                        onChange={(e) => setHorasPorDia(e.target.value)}
+                        placeholder="4"
+                        className="w-full px-3 py-2.5 rounded-xl border border-border focus:ring-2 focus:ring-indigo-500 transition-colors text-center"
+                      />
+                      <p className="text-[10px] font-bold text-slate-400 text-center mt-1 uppercase tracking-wide">Horas/dia</p>
+                    </div>
+                  </div>
                 </div>
 
-                {preco && vidaUtilHoras && parseFloat(vidaUtilHoras) > 0 && (
-                  <div className="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
-                    Depreciação: {formatCurrency(calculateCostPerHour(parseFloat(preco) || 0, parseFloat(vidaUtilHoras)))} por hora de uso
-                  </div>
-                )}
+                {(() => {
+                  const vidaUtilPreview = calculateUsefulLifeHours(
+                    parseFloat(anosDurabilidade) || 0,
+                    parseFloat(diasPorSemana) || 0,
+                    parseFloat(horasPorDia) || 0
+                  );
+                  if (!preco || vidaUtilPreview <= 0) return null;
+                  return (
+                    <div className="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                      Vida útil estimada: <strong>{vidaUtilPreview.toLocaleString('pt-BR')} horas</strong> — depreciação de{' '}
+                      <strong>{formatCurrency(calculateCostPerHour(parseFloat(preco) || 0, vidaUtilPreview))}/hora</strong> de uso
+                    </div>
+                  );
+                })()}
 
                 <button
                   type="submit"

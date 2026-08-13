@@ -195,6 +195,45 @@ export function calculateToolDepreciationCost(costPerHour: number, hoursUsedOnPi
   return roundCents((costPerHour || 0) * (hoursUsedOnPiece || 0));
 }
 
+/**
+ * Converte a estimativa "humana" de durabilidade em horas de vida útil:
+ * anos × 52 semanas × dias de uso por semana × horas de uso por dia.
+ * Qualquer entrada inválida (zero, negativa, NaN) zera o resultado — quem
+ * consome deve tratar 0 como "vida útil não preenchida".
+ */
+export function calculateUsefulLifeHours(
+  years: number,
+  daysPerWeek: number,
+  hoursPerDay: number
+): number {
+  if (!(years > 0) || !(daysPerWeek > 0) || !(hoursPerDay > 0)) return 0;
+  return years * 52 * daysPerWeek * hoursPerDay;
+}
+
+// --- PDV (Venda de Balcão) ---
+
+export type DiscountMode = 'valor' | 'percentual';
+
+/**
+ * Aplica um desconto (em R$ ou %) sobre o subtotal do carrinho.
+ * O resultado nunca fica negativo: desconto maior que o subtotal zera o total.
+ */
+export function applyDiscount(subtotal: number, discount: number, mode: DiscountMode): number {
+  const sub = Math.max(0, subtotal || 0);
+  const desc = Math.max(0, discount || 0);
+  const abatimento = mode === 'percentual' ? sub * (desc / 100) : desc;
+  return roundCents(Math.max(0, sub - abatimento));
+}
+
+/**
+ * Troco a devolver num pagamento em dinheiro. Retorna 0 enquanto o valor
+ * recebido ainda não cobre o total (a UI usa isso para bloquear a venda).
+ */
+export function calculateChange(amountReceived: number, total: number): number {
+  const diff = (amountReceived || 0) - (total || 0);
+  return diff > 0 ? roundCents(diff) : 0;
+}
+
 /** Abaixo desta margem, o alerta de "margem perigosa" é exibido na UI. */
 export const MARGEM_SEGURA_MINIMA_PERCENT = 10;
 

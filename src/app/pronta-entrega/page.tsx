@@ -10,19 +10,14 @@ import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
 
-interface EstoqueProntoItem {
-  id: string;
-  produtoId: string;
-  nome: string;
-  precoVenda: number;
-  quantidadeDisponivel: number;
-  userId: string;
-}
+import { EstoqueProntoItem } from '@/lib/erpTypes';
 
 interface CatalogoItem {
   id: string;
   nome: string;
   precoFinal: number;
+  /** Custo de produção calculado pela Calculadora — segue junto até a venda para rastrear lucro líquido. */
+  custoBase: number;
 }
 
 export default function ProntaEntregaPage() {
@@ -67,7 +62,9 @@ export default function ProntaEntregaPage() {
           produtoId: d.produtoId,
           nome: d.nome || 'Produto',
           precoVenda: parseFloat(d.precoVenda || 0),
+          custoUnitario: parseFloat(d.custoUnitario || 0),
           quantidadeDisponivel: parseInt(d.quantidadeDisponivel || 0),
+          esgotado: d.esgotado === true,
           userId: d.userId
         });
       });
@@ -81,10 +78,11 @@ export default function ProntaEntregaPage() {
       const cat: CatalogoItem[] = [];
       snap.forEach(docSnap => {
         const d = docSnap.data();
-        cat.push({ 
-          id: docSnap.id, 
-          nome: d.nome || d.name || 'Sem Nome', 
-          precoFinal: parseFloat(d.precoFinal || d.preco || d.price || 0)
+        cat.push({
+          id: docSnap.id,
+          nome: d.nome || d.name || 'Sem Nome',
+          precoFinal: parseFloat(d.precoFinal || d.preco || d.price || 0),
+          custoBase: parseFloat(d.custoBase || d.custo || 0)
         });
       });
       setCatalogo(cat);
@@ -123,18 +121,24 @@ export default function ProntaEntregaPage() {
       const itemExistente = estoquePronto.find(i => i.produtoId === formProdutoId);
       
       if (itemExistente) {
-        // Atualiza quantidade
+        // Atualiza quantidade e aproveita para atualizar o custo unitário
+        // (itens antigos na prateleira podem não ter o custo gravado).
         await updateDoc(doc(db, 'estoque_pronto', itemExistente.id), {
-          quantidadeDisponivel: increment(qtd)
+          quantidadeDisponivel: increment(qtd),
+          custoUnitario: prod?.custoBase || 0,
+          esgotado: false
         });
       } else {
-        // Cria novo registro
+        // Cria novo registro carregando o custo de produção da Calculadora,
+        // para a Venda de Balcão registrar lucro líquido real (não só faturamento).
         await addDoc(collection(db, 'estoque_pronto'), {
           userId: user.uid,
           produtoId: formProdutoId,
           nome: prod?.nome || 'Produto',
           precoVenda: prod?.precoFinal || 0,
+          custoUnitario: prod?.custoBase || 0,
           quantidadeDisponivel: qtd,
+          esgotado: false,
           createdAt: serverTimestamp()
         });
       }

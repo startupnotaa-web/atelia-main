@@ -4,6 +4,9 @@ import {
   calculateReverseMargin,
   calculateCostPerHour,
   calculateToolDepreciationCost,
+  calculateUsefulLifeHours,
+  applyDiscount,
+  calculateChange,
   roundCents,
   PricingEngineInput,
 } from './pricingEngine';
@@ -230,5 +233,64 @@ describe('calculatePricing - ferramentas via depreciação por hora-máquina', (
     // O cálculo reverso deve enxergar o custo total já incluindo a depreciação.
     const reverso = calculateReverseMargin(70, result.custoBaseTotal);
     expect(reverso.margemPercent).toBeCloseTo(((70 - 50.33) / 50.33) * 100, 2);
+  });
+});
+
+describe('calculateUsefulLifeHours (conversão humana → horas)', () => {
+  it('converte anos × 52 semanas × dias/semana × horas/dia', () => {
+    // 5 anos, 5 dias por semana, 4 horas por dia = 5 * 52 * 5 * 4 = 5200h
+    expect(calculateUsefulLifeHours(5, 5, 4)).toBe(5200);
+  });
+
+  it('retorna 0 quando qualquer entrada é zero, negativa ou NaN', () => {
+    expect(calculateUsefulLifeHours(0, 5, 4)).toBe(0);
+    expect(calculateUsefulLifeHours(5, 0, 4)).toBe(0);
+    expect(calculateUsefulLifeHours(5, 5, 0)).toBe(0);
+    expect(calculateUsefulLifeHours(-1, 5, 4)).toBe(0);
+    expect(calculateUsefulLifeHours(NaN, 5, 4)).toBe(0);
+  });
+
+  it('integra com calculateCostPerHour sem divisão por zero quando inputs faltam', () => {
+    const vidaUtil = calculateUsefulLifeHours(0, 0, 0);
+    expect(calculateCostPerHour(1500, vidaUtil)).toBe(0);
+  });
+});
+
+describe('applyDiscount (PDV)', () => {
+  it('aplica desconto em R$', () => {
+    expect(applyDiscount(100, 15, 'valor')).toBe(85);
+  });
+
+  it('aplica desconto em %', () => {
+    expect(applyDiscount(100, 10, 'percentual')).toBe(90);
+  });
+
+  it('arredonda percentuais quebrados em centavos', () => {
+    expect(applyDiscount(99.9, 33.33, 'percentual')).toBe(66.6); // 99.9 - 33.29667 = 66.60333 → 66.60
+  });
+
+  it('nunca deixa o total negativo (desconto maior que o subtotal zera)', () => {
+    expect(applyDiscount(50, 80, 'valor')).toBe(0);
+    expect(applyDiscount(50, 150, 'percentual')).toBe(0);
+  });
+
+  it('ignora descontos negativos e subtotais inválidos', () => {
+    expect(applyDiscount(100, -10, 'valor')).toBe(100);
+    expect(applyDiscount(NaN, 10, 'valor')).toBe(0);
+  });
+});
+
+describe('calculateChange (troco em dinheiro)', () => {
+  it('calcula o troco quando o valor recebido supera o total', () => {
+    expect(calculateChange(100, 73.5)).toBe(26.5);
+  });
+
+  it('retorna 0 quando o valor recebido ainda não cobre o total', () => {
+    expect(calculateChange(50, 73.5)).toBe(0);
+    expect(calculateChange(0, 73.5)).toBe(0);
+  });
+
+  it('não sofre com erro de ponto flutuante em centavos', () => {
+    expect(calculateChange(0.3, 0.1)).toBe(0.2); // 0.3 - 0.1 = 0.19999... sem arredondar
   });
 });

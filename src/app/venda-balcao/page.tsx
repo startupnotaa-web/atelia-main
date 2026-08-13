@@ -3,27 +3,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShoppingCart, Search, Loader2, Minus, Plus, Trash2,
-  PackageCheck, Banknote, QrCode, CreditCard, CheckCircle2, PartyPopper
+  PackageCheck, Banknote, QrCode, CreditCard, CheckCircle2, PartyPopper, TicketPercent
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, query, where, onSnapshot, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, writeBatch, doc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { forceRevalidateDashboard } from '@/app/actions/finance';
-
-interface EstoqueProntoItem {
-  id: string;
-  produtoId: string;
-  nome: string;
-  precoVenda: number;
-  quantidadeDisponivel: number;
-}
+import { applyDiscount, calculateChange, roundCents, DiscountMode } from '@/lib/pricingEngine';
+import { EstoqueProntoItem } from '@/lib/erpTypes';
 
 interface CartItem {
   prontoId: string;
   produtoId: string;
   nome: string;
+  /** Preço unitário editável no carrinho (negociação rápida no balcão). */
   preco: number;
+  precoOriginal: number;
+  custoUnitario: number;
   quantidade: number;
   maxDisponivel: number;
 }
@@ -40,6 +37,9 @@ export default function VendaBalcaoPage() {
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('pix');
+  const [desconto, setDesconto] = useState('');
+  const [descontoModo, setDescontoModo] = useState<DiscountMode>('valor');
+  const [valorRecebido, setValorRecebido] = useState('');
   const [lastSaleTotal, setLastSaleTotal] = useState<number | null>(null);
 
   useEffect(() => {
@@ -56,6 +56,7 @@ export default function VendaBalcaoPage() {
               produtoId: d.produtoId,
               nome: d.nome || 'Produto',
               precoVenda: parseFloat(d.precoVenda || 0),
+              custoUnitario: parseFloat(d.custoUnitario || 0),
               quantidadeDisponivel: parseInt(d.quantidadeDisponivel || 0),
             });
           });
@@ -81,8 +82,16 @@ export default function VendaBalcaoPage() {
     [estoquePronto, searchTerm]
   );
 
-  const total = cart.reduce((acc, item) => acc + item.preco * item.quantidade, 0);
+  // --- Totais (todos derivados, sem estado intermediário) ---
+  const subtotal = roundCents(cart.reduce((acc, item) => acc + item.preco * item.quantidade, 0));
   const totalPecas = cart.reduce((acc, item) => acc + item.quantidade, 0);
+  const descontoNum = parseFloat(desconto) || 0;
+  const total = applyDiscount(subtotal, descontoNum, descontoModo);
+  const valorDesconto = roundCents(subtotal - total);
+  const custoTotal = roundCents(cart.reduce((acc, item) => acc + item.custoUnitario * item.quantidade, 0));
+  const recebidoNum = parseFloat(valorRecebido) || 0;
+  const troco = calculateChange(recebidoNum, total);
+  const dinheiroInsuficiente = formaPagamento === 'dinheiro' && valorRecebido.trim() !== '' && recebidoNum < total;
 
   const addToCart = (item: EstoqueProntoItem) => {
     setLastSaleTotal(null);
@@ -100,6 +109,8 @@ export default function VendaBalcaoPage() {
         produtoId: item.produtoId,
         nome: item.nome,
         preco: item.precoVenda,
+        precoOriginal: item.precoVenda,
+        custoUnitario: item.custoUnitario,
         quantidade: 1,
         maxDisponivel: item.quantidadeDisponivel,
       }];
@@ -121,18 +132,71 @@ export default function VendaBalcaoPage() {
     );
   };
 
+  const changePrice = (prontoId: string, novoPreco: string) => {
+    const precoNum = parseFloat(novoPreco);
+    setCart(prev => prev.map(c =>
+      c.prontoId === prontoId ? { ...c, preco: isNaN(precoNum) ? 0 : Math.max(0, precoNum) } : c
+    ));
+  };
+
   const removeFromCart = (prontoId: string) => {
     setCart(prev => prev.filter(c => c.prontoId !== prontoId));
   };
 
+  const limparVenda = () => {
+    setCart([]);
+    setDesconto('');
+    setDescontoModo('valor');
+    setValorRecebido('');
+  };
+
+  /**
+   * Fluxo transacional unificado da venda de balcão (um único writeBatch atômico):
+   *  A) Estoque   — baixa a quantidadeDisponivel de cada item; zera → esgotado: true.
+   *  B) Financeiro — o pedido nasce com statusPagamento 'pago' e valorFinal já com
+   *     desconto; a Dashboard soma pedidos pagos como receita recebida (uma segunda
+   *     linha em finance_entries duplicaria o faturamento).
+   *  C) Lucro     — grava custo (produção, vindo da Calculadora via prateleira) e
+   *     lucro líquido no próprio pedido, que é o que a Dashboard usa em lucroLiquido.
+   */
   const finalizarVenda = async () => {
     if (!user || cart.length === 0) return;
 
+    if (total <= 0) {
+      toast.error('O total da venda não pode ser zero. Revise preços e desconto.');
+      return;
+    }
+
+    if (dinheiroInsuficiente) {
+      toast.error(`Valor recebido (${formatCurrency(recebidoNum)}) é menor que o total da venda.`);
+      return;
+    }
+
     setSaving(true);
     try {
+      // Itens antigos na prateleira podem não ter custoUnitario — busca no catálogo
+      // antes de gravar, para o lucro líquido do pedido não sair inflado.
+      const custosResolvidos = new Map<string, number>();
+      await Promise.all(cart.map(async (item) => {
+        if (item.custoUnitario > 0 || !item.produtoId) return;
+        try {
+          const catSnap = await getDoc(doc(db, 'catalogo', item.produtoId));
+          if (catSnap.exists()) {
+            const d = catSnap.data();
+            custosResolvidos.set(item.prontoId, parseFloat(d.custoBase || d.custo || 0) || 0);
+          }
+        } catch { /* item segue com custo 0; melhor vender do que travar a fila do balcão */ }
+      }));
+
+      const cartComCusto = cart.map(item => ({
+        ...item,
+        custoUnitario: item.custoUnitario > 0 ? item.custoUnitario : (custosResolvidos.get(item.prontoId) || 0),
+      }));
+      const custoTotalFinal = roundCents(cartComCusto.reduce((acc, item) => acc + item.custoUnitario * item.quantidade, 0));
+
       const batch = writeBatch(db);
 
-      // 1. Registrar o pedido já pago e entregue (venda de balcão)
+      // 1. Pedido pago e entregue — é ele que alimenta faturamento, recebido e lucro na Dashboard.
       const newOrderRef = doc(collection(db, 'pedidos'));
       batch.set(newOrderRef, {
         userId: user.uid,
@@ -140,29 +204,41 @@ export default function VendaBalcaoPage() {
         clienteNome: 'Cliente Balcão',
         produtoId: 'multiplos',
         produtoNome: cart.length === 1 ? cart[0].nome : `${totalPecas} peças (balcão)`,
+        subtotal,
+        desconto: valorDesconto,
+        descontoModo: valorDesconto > 0 ? descontoModo : null,
         valorFinal: total,
+        custo: custoTotalFinal,
+        lucro: roundCents(total - custoTotalFinal),
         dataEntrega: new Date().toISOString().split('T')[0],
         statusPagamento: 'pago',
         statusProducao: 'entregue',
         formaPagamento,
+        ...(formaPagamento === 'dinheiro' && valorRecebido.trim() !== '' ? {
+          valorRecebido: recebidoNum,
+          troco,
+        } : {}),
         origem: 'pdv_balcao',
-        items: cart.map(item => ({
+        items: cartComCusto.map(item => ({
           id: item.produtoId,
           produtoId: item.prontoId,
           name: item.nome,
           quantity: item.quantidade,
           price: item.preco,
+          precoOriginal: item.precoOriginal,
+          custoUnitario: item.custoUnitario,
         })),
         createdAt: serverTimestamp(),
       });
 
-      // 2. Baixa automática na prateleira de pronta-entrega
+      // 2. Baixa atômica na prateleira; zerou → marca esgotado.
       for (const item of cart) {
         const prontoAtual = estoquePronto.find(e => e.id === item.prontoId);
         if (!prontoAtual) continue;
         const novaQtd = Math.max(0, prontoAtual.quantidadeDisponivel - item.quantidade);
         batch.update(doc(db, 'estoque_pronto', item.prontoId), {
           quantidadeDisponivel: novaQtd,
+          esgotado: novaQtd === 0,
         });
       }
 
@@ -170,7 +246,7 @@ export default function VendaBalcaoPage() {
       forceRevalidateDashboard();
 
       setLastSaleTotal(total);
-      setCart([]);
+      limparVenda();
       toast.success('Venda registrada e estoque atualizado!');
     } catch (error) {
       console.error(error);
@@ -194,6 +270,8 @@ export default function VendaBalcaoPage() {
     { id: 'cartao', label: 'Cartão', icon: CreditCard },
   ];
 
+  const podeFinalizar = !saving && total > 0 && !dinheiroInsuficiente;
+
   return (
     <div className="min-h-screen bg-background p-4 md:p-8 font-sans animate-in fade-in duration-500">
       <header className="mb-6">
@@ -201,7 +279,7 @@ export default function VendaBalcaoPage() {
           <ShoppingCart className="text-primary" size={34} />
           Venda de Balcão
         </h1>
-        <p className="text-success mt-1 font-bold">Toque na peça, confira o total e pronto — estoque baixa sozinho.</p>
+        <p className="text-success mt-1 font-bold">Toque na peça, ajuste preço e desconto se precisar — estoque e financeiro atualizam sozinhos.</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pb-32 lg:pb-10">
@@ -284,37 +362,89 @@ export default function VendaBalcaoPage() {
               )}
 
               {cart.map(item => (
-                <div key={item.prontoId} className="flex items-center gap-3 border-b border-border pb-4 last:border-b-0 last:pb-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-800 truncate">{item.nome}</p>
-                    <p className="text-sm font-black text-success">{formatCurrency(item.preco * item.quantidade)}</p>
-                  </div>
-                  <div className="flex items-center gap-2 bg-background rounded-xl border border-border p-1 shrink-0">
+                <div key={item.prontoId} className="border-b border-border pb-4 last:border-b-0 last:pb-0 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <p className="flex-1 min-w-0 font-bold text-slate-800 truncate">{item.nome}</p>
                     <button
-                      onClick={() => changeQty(item.prontoId, -1)}
-                      className="w-9 h-9 flex items-center justify-center rounded-lg bg-surface text-slate-600 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm"
+                      onClick={() => removeFromCart(item.prontoId)}
+                      className="text-slate-300 hover:text-red-500 transition-colors shrink-0"
                     >
-                      <Minus size={18} />
-                    </button>
-                    <span className="w-6 text-center font-black text-foreground">{item.quantidade}</span>
-                    <button
-                      onClick={() => changeQty(item.prontoId, 1)}
-                      className="w-9 h-9 flex items-center justify-center rounded-lg bg-surface text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shadow-sm"
-                    >
-                      <Plus size={18} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
-                  <button
-                    onClick={() => removeFromCart(item.prontoId)}
-                    className="text-slate-300 hover:text-red-500 transition-colors shrink-0"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* Preço unitário editável — negociação rápida no balcão */}
+                    <div className="flex items-center gap-1 bg-background rounded-xl border border-border px-2 py-1 flex-1 min-w-0">
+                      <span className="text-xs font-black text-slate-400 shrink-0">R$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={item.preco}
+                        onChange={(e) => changePrice(item.prontoId, e.target.value)}
+                        className="w-full bg-transparent font-black text-slate-800 focus:outline-none py-1"
+                        title="Preço unitário (editável)"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 bg-background rounded-xl border border-border p-1 shrink-0">
+                      <button
+                        onClick={() => changeQty(item.prontoId, -1)}
+                        className="w-9 h-9 flex items-center justify-center rounded-lg bg-surface text-slate-600 hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm"
+                      >
+                        <Minus size={18} />
+                      </button>
+                      <span className="w-6 text-center font-black text-foreground">{item.quantidade}</span>
+                      <button
+                        onClick={() => changeQty(item.prontoId, 1)}
+                        className="w-9 h-9 flex items-center justify-center rounded-lg bg-surface text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shadow-sm"
+                      >
+                        <Plus size={18} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-black text-success">{formatCurrency(item.preco * item.quantidade)}</span>
+                    {item.preco !== item.precoOriginal && (
+                      <span className="text-xs font-bold text-slate-400 line-through">{formatCurrency(item.precoOriginal * item.quantidade)}</span>
+                    )}
+                  </div>
                 </div>
               ))}
 
               {cart.length > 0 && (
                 <>
+                  {/* Desconto */}
+                  <div>
+                    <p className="text-sm font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <TicketPercent size={16} /> Desconto (opcional)
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={desconto}
+                        onChange={(e) => setDesconto(e.target.value)}
+                        placeholder="0"
+                        className="flex-1 min-w-0 px-3 py-2.5 rounded-xl border-2 border-border bg-background font-bold text-slate-800 focus:outline-none focus:border-primary"
+                      />
+                      <div className="flex rounded-xl border-2 border-border overflow-hidden shrink-0">
+                        <button
+                          onClick={() => setDescontoModo('valor')}
+                          className={`px-3 py-2 text-sm font-black transition-colors ${descontoModo === 'valor' ? 'bg-primary text-slate-900' : 'bg-background text-slate-500'}`}
+                        >
+                          R$
+                        </button>
+                        <button
+                          onClick={() => setDescontoModo('percentual')}
+                          className={`px-3 py-2 text-sm font-black transition-colors ${descontoModo === 'percentual' ? 'bg-primary text-slate-900' : 'bg-background text-slate-500'}`}
+                        >
+                          %
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Forma de pagamento */}
                   <div>
                     <p className="text-sm font-black text-slate-500 uppercase tracking-wider mb-2">Como recebeu?</p>
@@ -336,15 +466,62 @@ export default function VendaBalcaoPage() {
                     </div>
                   </div>
 
-                  {/* Total */}
-                  <div className="flex items-center justify-between bg-background rounded-2xl border-2 border-border p-4">
-                    <span className="text-lg font-black text-slate-500 uppercase tracking-wider">Total</span>
-                    <span className="text-3xl font-black text-slate-900">{formatCurrency(total)}</span>
+                  {/* Dinheiro: valor recebido + troco */}
+                  {formaPagamento === 'dinheiro' && (
+                    <div className="bg-background rounded-2xl border-2 border-border p-4 space-y-3">
+                      <div>
+                        <label className="text-sm font-bold text-slate-600 mb-1 block">Valor Recebido (R$)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={valorRecebido}
+                          onChange={(e) => setValorRecebido(e.target.value)}
+                          placeholder={total > 0 ? total.toFixed(2) : '0,00'}
+                          className="w-full px-3 py-2.5 rounded-xl border-2 border-border bg-surface font-black text-lg text-slate-800 focus:outline-none focus:border-primary"
+                        />
+                      </div>
+                      {dinheiroInsuficiente ? (
+                        <p className="text-sm font-bold text-red-500">
+                          Faltam {formatCurrency(roundCents(total - recebidoNum))} para completar o pagamento.
+                        </p>
+                      ) : valorRecebido.trim() !== '' && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-black text-slate-500 uppercase tracking-wider">Troco</span>
+                          <span className="text-2xl font-black text-success">{formatCurrency(troco)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Totais */}
+                  <div className="bg-background rounded-2xl border-2 border-border p-4 space-y-2">
+                    {valorDesconto > 0 && (
+                      <>
+                        <div className="flex items-center justify-between text-sm font-bold text-slate-500">
+                          <span>Subtotal</span>
+                          <span>{formatCurrency(subtotal)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm font-bold text-red-500">
+                          <span>Desconto{descontoModo === 'percentual' ? ` (${descontoNum}%)` : ''}</span>
+                          <span>- {formatCurrency(valorDesconto)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-lg font-black text-slate-500 uppercase tracking-wider">Total</span>
+                      <span className="text-3xl font-black text-slate-900">{formatCurrency(total)}</span>
+                    </div>
+                    {custoTotal > 0 && total > 0 && (
+                      <p className="text-xs font-bold text-slate-400 text-right">
+                        Lucro estimado: {formatCurrency(roundCents(total - custoTotal))}
+                      </p>
+                    )}
                   </div>
 
                   <button
                     onClick={finalizarVenda}
-                    disabled={saving}
+                    disabled={!podeFinalizar}
                     className="w-full bg-primary hover:bg-primary-hover text-slate-900 font-black text-xl py-5 rounded-2xl transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0 flex items-center justify-center gap-3"
                   >
                     {saving ? (
@@ -369,7 +546,7 @@ export default function VendaBalcaoPage() {
           </div>
           <button
             onClick={finalizarVenda}
-            disabled={saving}
+            disabled={!podeFinalizar}
             className="bg-primary hover:bg-primary-hover text-slate-900 font-black text-lg py-4 px-6 rounded-2xl shadow-md disabled:opacity-50 flex items-center gap-2"
           >
             {saving ? <Loader2 className="animate-spin" size={22} /> : <CheckCircle2 size={22} />}
