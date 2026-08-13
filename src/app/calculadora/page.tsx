@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, getDocs, query, where, writeBatch, doc, serverTimestamp, increment, getDoc } from 'firebase/firestore';
-import { Plus, Trash2, Save, Calculator, Receipt, DollarSign, Clock, Scissors, Lightbulb, Settings, ShoppingCart, User as UserIcon, ImageIcon, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Save, Calculator, Receipt, DollarSign, Clock, Scissors, Lightbulb, Settings, ShoppingCart, User as UserIcon, ImageIcon, Loader2, AlertTriangle, RotateCcw, PackagePlus } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import { uploadImage } from '@/app/actions/upload-image';
 import { fetchUserLimitsAction } from '@/app/actions/user';
 import LimitModal from '@/components/LimitModal';
 import Tooltip from '@/components/Tooltip';
 import CostReceipt from '@/components/CostReceipt';
-import { calculatePricing } from '@/lib/pricingEngine';
+import { calculatePricing, calculateReverseMargin, roundCents, MARGEM_SEGURA_MINIMA_PERCENT } from '@/lib/pricingEngine';
 
 interface Material {
   id: string;
@@ -73,6 +73,9 @@ export default function CalculadoraPage() {
   const [showVendaModal, setShowVendaModal] = useState(false);
   const [isRounded, setIsRounded] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
+  // Cálculo reverso (goal seek): quando preenchido, o usuário sobrescreveu o
+  // preço final sugerido — o custo total fica "travado" e a margem é derivada dele.
+  const [precoFinalOverride, setPrecoFinalOverride] = useState('');
 
   // Listas do BD
   const [itensEstoque, setItensEstoque] = useState<ItemEstoque[]>([]);
@@ -261,6 +264,39 @@ export default function CalculadoraPage() {
   const precoFinalVenda = resultado.precoFinalVenda;
   const lucroAtelie = resultado.lucroReal;
 
+  // --- CÁLCULO REVERSO (GOAL SEEK) ---
+  // Puramente derivado a cada render — sem useEffect — para nunca criar um
+  // loop entre o Preço Final digitado e a Margem de Lucro recalculada.
+  const isPrecoOverridden = precoFinalOverride.trim() !== '';
+  const precoFinalDigitadoNum = parseFloat(precoFinalOverride) || 0;
+  const reverso = isPrecoOverridden
+    ? calculateReverseMargin(precoFinalDigitadoNum, custoBaseTotal)
+    : null;
+
+  const precoFinalExibido = isPrecoOverridden ? precoFinalDigitadoNum : precoFinalVenda;
+  const margemExibida = isPrecoOverridden ? reverso!.margemPercent : margem;
+  const lucroExibido = isPrecoOverridden ? reverso!.lucroReal : lucroAtelie;
+  const margemPerigosa = margemExibida < MARGEM_SEGURA_MINIMA_PERCENT;
+  const precoInvalido = isPrecoOverridden ? precoFinalExibido <= 0 : divisorMarkup <= 0;
+
+  // Taxas transacionais escaladas para o preço exibido, para o Recibo de Custos
+  // continuar batendo com o preço final mesmo quando ele foi digitado manualmente.
+  const valorCartaoExibido = roundCents(precoFinalExibido * (maquininha / 100));
+  const valorPlataformaExibido = roundCents(precoFinalExibido * (plataforma / 100));
+  const valorImpostoExibido = roundCents(precoFinalExibido * (imp / 100));
+
+  const breakdownExibido = isPrecoOverridden
+    ? [
+        { label: 'Materiais', valor: resultado.custoMateriais },
+        { label: 'Mão de Obra', valor: custoMaoDeObra },
+        { label: 'Ferramentas', valor: resultado.custoFerramentas },
+        { label: 'Custos Fixos', valor: custoFixoTotal },
+        { label: 'Embalagem/Frete', valor: custoEmbalagens },
+        { label: 'Taxas (cartão/plataforma/imposto)', valor: roundCents(valorCartaoExibido + valorPlataformaExibido + valorImpostoExibido) },
+        { label: 'Lucro', valor: lucroExibido },
+      ]
+    : resultado.breakdown;
+
   // --- FUNÇÕES DE LISTAS ---
   const handleMaterialChange = (id: string, campo: string, valor: string) => {
     setMateriais(materiais.map(m => {
@@ -323,9 +359,9 @@ export default function CalculadoraPage() {
   // --- SALVAMENTOS ---
   const getPayloadBase = () => ({
     nome: nomeDaPeca || 'Peça sem nome',
-    precoFinal: precoFinalVenda,
+    precoFinal: precoFinalExibido,
     custoBase: custoBaseTotal,
-    lucroReal: lucroAtelie,
+    lucroReal: lucroExibido,
     userId: user!.uid,
     createdAt: new Date().toISOString(),
     fotoUrl: fotoDaPeca,
@@ -337,24 +373,27 @@ export default function CalculadoraPage() {
       ferramentas: ferramentas.filter(f => f.nome.trim() || f.custo),
       custosFixos: custoFixoTotal,
       embalagens: custoEmbalagens,
-      taxas: { margem, maquininha, plataforma, imposto }
+      taxas: { margem: margemExibida, maquininha, plataforma, imposto },
+      precoAjustadoManualmente: isPrecoOverridden,
     }
   });
 
-  const salvarNoCatalogo = async () => {
+  // "Salvar como Novo Produto" — grava no catálogo (coleção `catalogo`), a
+  // mesma fonte usada por /meus-produtos e pela futura Venda de Balcão.
+  const salvarComoProduto = async () => {
     if (!user) return;
-    if (precoFinalVenda <= 0) {
+    if (precoInvalido) {
       toast.error('O preço final não pode ser zero ou negativo.');
       return;
     }
     setIsSaving(true);
-    const loadingToast = toast.loading('Salvando no catálogo...');
+    const loadingToast = toast.loading('Salvando produto...');
     try {
       const payload = getPayloadBase();
       // Import dynamic or just use fetch if we want, but since it's a client component and we can import server actions:
       const { addCatalogItem } = await import('@/app/actions/erp');
       const result = await addCatalogItem(payload);
-      
+
       if (!result.success) {
         if (result.error === 'LIMIT_REACHED_PRODUCTS') {
           toast.dismiss(loadingToast);
@@ -364,8 +403,8 @@ export default function CalculadoraPage() {
         }
         return;
       }
-      
-      toast.success('Peça salva no catálogo!', { id: loadingToast });
+
+      toast.success('Produto salvo no catálogo!', { id: loadingToast });
     } catch (error) {
       toast.error('Erro ao salvar.', { id: loadingToast });
     } finally {
@@ -380,6 +419,7 @@ export default function CalculadoraPage() {
     setTempoMinutos('');
     setMateriais([{ id: Date.now().toString(), nome: '', custo: '', quantidade: '1' }]);
     setFerramentas([{ id: Date.now().toString(), nome: '', valorCompra: '', vidaUtil: '', tempoUso: '', custo: '0' }]);
+    setPrecoFinalOverride('');
   };
 
   const [statusPedido, setStatusPedido] = useState<'queue' | 'production' | 'finished'>('finished');
@@ -414,29 +454,30 @@ export default function CalculadoraPage() {
       
       let paymentStatus = 'pending';
       let paidValue = 0;
-      let remainingValue = precoFinalVenda;
+      let remainingValue = precoFinalExibido;
 
       if (statusPedido === 'finished') {
         paymentStatus = 'paid';
-        paidValue = precoFinalVenda;
+        paidValue = precoFinalExibido;
         remainingValue = 0;
       }
-      
+
       // 1. Gravar a Venda na coleção 'pedidos' (Single Source of Truth)
       const novaVendaRef = doc(collection(db, 'pedidos'));
-      
+
       const pedido = {
         userId: user.uid,
         cliente: nomeCliente.trim() || 'Cliente Balcão',
         produto: nomeDaPeca || 'Peça sem nome',
-        valor: precoFinalVenda,
+        valor: precoFinalExibido,
         custo: custoBaseTotal,
-        lucro: lucroAtelie,
+        lucro: lucroExibido,
+        precoAjustadoManualmente: isPrecoOverridden,
         status: statusPedido === 'queue' ? 'pendente' : statusPedido === 'production' ? 'em_producao' : 'concluido',
         data: dataAtualIso,
-        createdAt: serverTimestamp() 
+        createdAt: serverTimestamp()
       };
-      
+
       batch.set(novaVendaRef, pedido);
 
       // 2. Gravar Transação Financeira na coleção 'transactions' APENAS se estiver pago
@@ -444,7 +485,7 @@ export default function CalculadoraPage() {
         const novaTransacaoRef = doc(collection(db, 'transactions'));
         batch.set(novaTransacaoRef, {
           orderId: novaVendaRef.id,
-          amount: precoFinalVenda,
+          amount: precoFinalExibido,
           type: 'integral',
           userId: user.uid,
           createdAt: dataAtualIso
@@ -875,65 +916,94 @@ export default function CalculadoraPage() {
 
                 <div className="space-y-3 pb-4 border-b-2 border-border border-dashed">
                   <p className="text-xs font-black text-slate-500 uppercase tracking-wider mb-1">Recibo de Custos</p>
-                  <CostReceipt items={resultado.breakdown} total={precoFinalVenda} />
+                  <CostReceipt items={breakdownExibido} total={precoFinalExibido} />
                   <div className="flex justify-between items-center pt-2 bg-background rounded-xl px-3 py-2.5 border border-border">
                     <span className="font-black text-slate-700 text-sm uppercase tracking-wider">Custo Total</span>
                     <span className="font-black text-slate-900 text-lg">{formatCurrency(custoBaseTotal)}</span>
+                  </div>
+
+                  {userLimits && !userLimits.isPro && (
+                    <div className="text-center pt-1">
+                      <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${userLimits.usage.savedProducts >= userLimits.limits.savedProducts ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
+                        {userLimits.usage.savedProducts} / {userLimits.limits.savedProducts} Produtos Criados
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                    <button
+                      onClick={salvarComoProduto}
+                      disabled={isSaving || precoInvalido || (userLimits && !userLimits.isPro && userLimits.usage.savedProducts >= userLimits.limits.savedProducts)}
+                      className="w-full flex items-center justify-center gap-2 bg-secondary hover:bg-secondary-hover text-white font-bold text-sm py-3 px-3 rounded-xl transition-colors disabled:opacity-50 shadow-sm"
+                    >
+                      {isSaving ? <div className="animate-spin h-4 w-4 border-b-2 border-white rounded-full"></div> : <><PackagePlus size={18} /> Salvar como Novo Produto</>}
+                    </button>
+
+                    <button
+                      onClick={() => setShowVendaModal(true)}
+                      disabled={isSelling || precoInvalido}
+                      className="w-full flex items-center justify-center gap-2 bg-background text-foreground border-2 border-border hover:border-primary hover:text-primary font-bold text-sm py-3 px-3 rounded-xl transition-colors disabled:opacity-50"
+                    >
+                      <ShoppingCart size={18} /> Transformar em Pedido
+                    </button>
                   </div>
                 </div>
 
                 <div className="bg-primary text-slate-900 p-6 rounded-2xl text-center shadow-lg">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="block text-slate-800/70 text-xs uppercase tracking-wider font-black">
+                    <span className="block text-slate-800/70 text-xs uppercase tracking-wider font-black flex items-center gap-1.5">
                       Venda Por
+                      <Tooltip text="Você pode digitar o preço que quiser vender por aqui. O sistema trava seu custo total e recalcula a margem de lucro automaticamente a partir do preço digitado (cálculo reverso)." />
                     </span>
                     <label className="flex items-center gap-2 cursor-pointer bg-slate-900/10 px-2.5 py-1.5 rounded-lg hover:bg-slate-900/20 transition-colors">
                       <span className="text-[10px] font-black uppercase tracking-wider">Arredondar</span>
                       <input type="checkbox" className="w-4 h-4 rounded accent-secondary" checked={isRounded} onChange={(e) => setIsRounded(e.target.checked)} />
                     </label>
                   </div>
-                  <span className="block text-5xl font-black mt-2 tracking-tight">
-                    {formatCurrency(precoFinalVenda)}
-                  </span>
+                  <div className="flex items-center justify-center gap-1 mt-2">
+                    <span className="text-2xl font-black">R$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={isPrecoOverridden ? precoFinalOverride : (precoFinalExibido > 0 ? precoFinalExibido.toFixed(2) : '')}
+                      onChange={(e) => setPrecoFinalOverride(e.target.value)}
+                      className="bg-transparent text-5xl font-black tracking-tight text-center w-full max-w-[220px] focus:outline-none border-b-2 border-slate-900/25 focus:border-slate-900 transition-colors"
+                    />
+                  </div>
+                  {isPrecoOverridden && (
+                    <button
+                      onClick={() => setPrecoFinalOverride('')}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-slate-800/70 hover:text-slate-900 underline"
+                    >
+                      <RotateCcw size={12} /> Usar preço sugerido automaticamente
+                    </button>
+                  )}
                 </div>
 
-                <div className="flex justify-between items-center text-success bg-green-50 p-4 rounded-2xl border-2 border-green-100">
-                  <span className="font-bold text-sm flex items-center gap-2">
-                    <DollarSign size={18} /> Fica no seu bolso ({margem}%)
-                  </span>
-                  <span className="font-black text-xl">{formatCurrency(lucroAtelie)}</span>
-                </div>
-
-                <div className="text-xs text-slate-400 font-medium text-center pb-2">
-                  As taxas de plataforma, maquininha e impostos (Total: {somaPercentuais - margem}%) já estão embutidas no preço sugerido.
-                </div>
-                
-                {userLimits && !userLimits.isPro && (
-                  <div className="text-center mt-4">
-                    <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${userLimits.usage.savedProducts >= userLimits.limits.savedProducts ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-                      {userLimits.usage.savedProducts} / {userLimits.limits.savedProducts} Produtos Criados
+                {margemPerigosa && (
+                  <div className="flex items-start gap-2 p-3 rounded-xl border-2 border-red-200 bg-red-50 text-red-600 text-xs font-bold">
+                    <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                    <span>
+                      Margem de lucro perigosa: só {margemExibida.toFixed(1)}%
+                      {isPrecoOverridden ? ' com o preço digitado' : ''}. O ideal é manter acima de {MARGEM_SEGURA_MINIMA_PERCENT}% para não trabalhar no prejuízo.
                     </span>
                   </div>
                 )}
 
-                <div className="space-y-3 pt-2">
-                  <button
-                    onClick={salvarNoCatalogo}
-                    disabled={isSaving || divisorMarkup <= 0 || (userLimits && !userLimits.isPro && userLimits.usage.savedProducts >= userLimits.limits.savedProducts)}
-                    className="w-full flex items-center justify-center gap-2 bg-secondary hover:bg-secondary-hover text-white font-bold text-lg py-4 px-4 rounded-xl transition-colors disabled:opacity-50 shadow-sm"
-                  >
-                    {isSaving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save size={20} /> Salvar no Catálogo</>}
-                  </button>
-
-                  <button
-                    onClick={() => setShowVendaModal(true)}
-                    disabled={isSelling || divisorMarkup <= 0}
-                    className="w-full flex items-center justify-center gap-2 bg-background text-foreground border-2 border-border hover:border-primary hover:text-primary font-bold text-lg py-4 px-4 rounded-xl transition-colors disabled:opacity-50"
-                  >
-                    <ShoppingCart size={20} /> Gerar Pedido (Venda)
-                  </button>
+                <div className={`flex justify-between items-center p-4 rounded-2xl border-2 ${margemPerigosa ? 'text-alert bg-amber-50 border-amber-200' : 'text-success bg-green-50 border-green-100'}`}>
+                  <span className="font-bold text-sm flex items-center gap-2">
+                    <DollarSign size={18} /> Fica no seu bolso ({margemExibida.toFixed(1)}%)
+                  </span>
+                  <span className="font-black text-xl">{formatCurrency(lucroExibido)}</span>
                 </div>
-                
+
+                <div className="text-xs text-slate-400 font-medium text-center pb-2">
+                  {isPrecoOverridden
+                    ? 'Preço ajustado manualmente — a margem acima já reflete o novo preço sobre o custo total travado.'
+                    : `As taxas de plataforma, maquininha e impostos (Total: ${somaPercentuais - margem}%) já estão embutidas no preço sugerido.`}
+                </div>
+
               </div>
             </div>
           </div>
@@ -1006,7 +1076,7 @@ export default function CalculadoraPage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Total:</span>
-                  <span className="font-black text-primary">{formatCurrency(precoFinalVenda)}</span>
+                  <span className="font-black text-primary">{formatCurrency(precoFinalExibido)}</span>
                 </div>
               </div>
 

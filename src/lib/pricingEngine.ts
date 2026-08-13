@@ -163,3 +163,37 @@ export function calculatePricing(input: PricingEngineInput): PricingEngineResult
     breakdown,
   };
 }
+
+/** Abaixo desta margem, o alerta de "margem perigosa" é exibido na UI. */
+export const MARGEM_SEGURA_MINIMA_PERCENT = 10;
+
+export interface ReverseMarginResult {
+  /** Margem de lucro implícita no preço digitado pelo usuário, em %. */
+  margemPercent: number;
+  /** Lucro em R$ (preço digitado - custo total travado). */
+  lucroReal: number;
+  /** true quando a margem implícita está abaixo do limite seguro. */
+  margemPerigosa: boolean;
+}
+
+/**
+ * Cálculo reverso (goal seek): dado um Preço Final digitado manualmente pelo
+ * usuário e o Custo Total já travado (materiais + mão de obra + rateios),
+ * deriva a Margem de Lucro implícita. Não usa o divisor de markup do cálculo
+ * direto — é uma margem simples sobre o custo, conforme pedido pelo negócio.
+ */
+export function calculateReverseMargin(
+  precoFinalDigitado: number,
+  custoTotal: number
+): ReverseMarginResult {
+  if (!(custoTotal > 0)) {
+    return { margemPercent: 0, lucroReal: 0, margemPerigosa: false };
+  }
+  const lucroReal = roundCents(precoFinalDigitado - custoTotal);
+  const margemPercent = roundCents(((precoFinalDigitado - custoTotal) / custoTotal) * 100);
+  return {
+    margemPercent,
+    lucroReal,
+    margemPerigosa: margemPercent < MARGEM_SEGURA_MINIMA_PERCENT,
+  };
+}

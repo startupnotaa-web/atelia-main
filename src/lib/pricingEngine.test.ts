@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculatePricing, roundCents, PricingEngineInput } from './pricingEngine';
+import { calculatePricing, calculateReverseMargin, roundCents, PricingEngineInput } from './pricingEngine';
 
 function baseInput(overrides: Partial<PricingEngineInput> = {}): PricingEngineInput {
   return {
@@ -122,5 +122,39 @@ describe('calculatePricing - markup e preço final', () => {
     const result = calculatePricing(input);
     const somaBreakdown = result.breakdown.reduce((acc, item) => acc + item.valor, 0);
     expect(Math.abs(somaBreakdown - result.precoFinalVenda)).toBeLessThanOrEqual(0.01);
+  });
+});
+
+describe('calculateReverseMargin (goal seek)', () => {
+  it('deriva a margem a partir do preço digitado e do custo total travado', () => {
+    const result = calculateReverseMargin(150, 100);
+    expect(result.margemPercent).toBe(50);
+    expect(result.lucroReal).toBe(50);
+    expect(result.margemPerigosa).toBe(false);
+  });
+
+  it('sinaliza margem perigosa quando abaixo do limite seguro (10%)', () => {
+    const result = calculateReverseMargin(105, 100);
+    expect(result.margemPercent).toBe(5);
+    expect(result.margemPerigosa).toBe(true);
+  });
+
+  it('sinaliza margem perigosa (negativa) quando o preço digitado é menor que o custo', () => {
+    const result = calculateReverseMargin(80, 100);
+    expect(result.margemPercent).toBe(-20);
+    expect(result.lucroReal).toBe(-20);
+    expect(result.margemPerigosa).toBe(true);
+  });
+
+  it('retorna zero com segurança quando o custo total é zero (evita divisão por zero)', () => {
+    const result = calculateReverseMargin(150, 0);
+    expect(result.margemPercent).toBe(0);
+    expect(result.margemPerigosa).toBe(false);
+  });
+
+  it('não trava (loop) quando aplicado repetidamente ao mesmo par preço/custo — é uma função pura', () => {
+    const a = calculateReverseMargin(133.33, 100);
+    const b = calculateReverseMargin(133.33, 100);
+    expect(a).toEqual(b);
   });
 });
