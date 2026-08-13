@@ -5,9 +5,9 @@ import { useTenant } from '@/lib/TenantProvider';
 import PaywallUpsell from '@/components/PaywallUpsell';
 import { TrendingUp, Activity, BarChart3, Clock, DollarSign, Package, Percent, Target, HeartPulse, Telescope, CheckSquare, Loader2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
-import { auth, db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { auth } from '@/lib/firebase';
 import { toast } from 'react-hot-toast';
+import { fetchDashboardData } from '@/app/actions/dashboard';
 
 type Metrics = {
   margemLucro: number;
@@ -42,124 +42,43 @@ export default function EvolucaoPage() {
     }
   }, [isPro, userId]);
 
+  // Consome exatamente o mesmo processamento da Dashboard principal
+  // (fetchDashboardData, src/app/actions/dashboard.ts) em vez de consultar o
+  // Firestore direto — as duas telas agora leem os mesmos números de
+  // faturamento/lucro/despesas, calculados uma única vez, no mesmo lugar
+  // (INTEGRATION_BLUEPRINT.md §2.8). Sem filtro de período: Evolução sempre
+  // olhou o histórico completo, então chamamos sem o segundo argumento.
   const loadFinancialData = async () => {
     if (!userId) return;
     setLoadingData(true);
     try {
-      const [financeSnap, pedidosSnap, estoqueSnap] = await Promise.all([
-        getDocs(query(collection(db, 'finance_entries'), where('userId', '==', userId))),
-        getDocs(query(collection(db, 'pedidos'), where('userId', '==', userId))),
-        getDocs(query(collection(db, 'estoque'), where('userId', '==', userId)))
-      ]);
+      const data = await fetchDashboardData(userId);
+      const {
+        faturamentoBruto, lucroLiquido, saldoCaixa, aReceber,
+        despesasMateriaPrima, despesasMarketing, despesasFixas,
+        valorTotalEstoque, totalPedidos,
+      } = data.metrics;
 
-      let totalReceita = 0;
-      let totalCustoProducao = 0;
-      let despesasFixas = 0;
-      let despesasMarketing = 0;
-      
-      let caixaAtual = 0;
-      let contasReceber = 0;
-      
-      const pedidosAgrupadosPorMes: Record<string, { receita: number, despesa: number }> = {};
+      // Margem/Lucro Líquido são os MESMOS números da Dashboard: já ignoram
+      // pedidos com statusPagamento 'pendente' (ex: orçamento recém-aprovado
+      // ainda não pago) — dinheiro que não entrou não conta como faturamento.
+      const margemLucro = faturamentoBruto > 0 ? (lucroLiquido / faturamentoBruto) * 100 : 0;
+      const ticketMedio = totalPedidos > 0 ? faturamentoBruto / totalPedidos : 0;
+      const roiMateriais = despesasMateriaPrima > 0 ? ((faturamentoBruto - despesasMateriaPrima) / despesasMateriaPrima) * 100 : 0;
+      const capitalGiro = (saldoCaixa + aReceber) - despesasFixas;
 
-      // 1. Processar Pedidos (Receitas e Recebíveis)
-      const numPedidos = pedidosSnap.size;
-      pedidosSnap.forEach(doc => {
-        const data = doc.data();
-        const valor = Number(data.valorFinal) || Number(data.valor) || Number(data.totalValue) || 0;
-        
-        let pago = 0;
-        if (data.statusPagamento === 'pago') pago = valor;
-        else if (data.statusPagamento === 'sinal') pago = valor / 2;
-        else if (data.statusPagamento === 'pendente') pago = 0;
-        else pago = Number(data.paidValue) || 0; // Legacy
-        
-        const aReceber = valor - pago;
-        
-        totalReceita += valor;
-        contasReceber += aReceber;
-        caixaAtual += pago;
-
-        // Para o gráfico
-        const dateString = data.data || data.createdAt || data.orderDate;
-        if (dateString) {
-          const date = new Date(typeof dateString?.toDate === 'function' ? dateString.toDate() : dateString);
-          if (!isNaN(date.getTime())) {
-            const monthYear = `${date.getMonth() + 1}/${date.getFullYear()}`;
-            if (!pedidosAgrupadosPorMes[monthYear]) pedidosAgrupadosPorMes[monthYear] = { receita: 0, despesa: 0 };
-            pedidosAgrupadosPorMes[monthYear].receita += valor;
-          }
-        }
-      });
-
-      // 2. Processar Despesas (Finance Entries)
-      financeSnap.forEach(doc => {
-        const data = doc.data();
-        const valor = data.value || 0;
-        
-        if (data.type === 'saida') {
-          caixaAtual -= valor;
-          
-          if (data.category === 'Matéria-prima') {
-            totalCustoProducao += valor;
-          } else if (data.category === 'Marketing' || data.category === 'Marketing / Embalagem') {
-            despesasMarketing += valor;
-          } else {
-            despesasFixas += valor;
-          }
-
-          // Para o gráfico
-          if (data.date) {
-            const date = new Date(data.date);
-            const monthYear = `${date.getMonth() + 1}/${date.getFullYear()}`;
-            if (!pedidosAgrupadosPorMes[monthYear]) pedidosAgrupadosPorMes[monthYear] = { receita: 0, despesa: 0 };
-            pedidosAgrupadosPorMes[monthYear].despesa += valor;
-          }
-        } else if (data.type === 'entrada' && !data.pedidoId) {
-          // Entradas com `pedidoId` são espelho da receita de um pedido
-          // (gravadas por registrarVenda, src/app/actions/sales.ts): o caixa
-          // e a receita dessa venda já foram somados acima, no loop de
-          // "Processar Pedidos" (via `pago`). Somar aqui de novo — em caixa
-          // OU em receita — contaria a mesma venda duas vezes.
-          caixaAtual += valor;
-          totalReceita += valor;
-
-          if (data.date) {
-            const date = new Date(data.date);
-            const monthYear = `${date.getMonth() + 1}/${date.getFullYear()}`;
-            if (!pedidosAgrupadosPorMes[monthYear]) pedidosAgrupadosPorMes[monthYear] = { receita: 0, despesa: 0 };
-            pedidosAgrupadosPorMes[monthYear].receita += valor;
-          }
-        }
-      });
-
-      // 3. Processar Estoque
-      let valorTotalEstoque = 0;
-      estoqueSnap.forEach(doc => {
-        const data = doc.data();
-        valorTotalEstoque += (data.price || 0) * (data.quantity || 0);
-      });
-
-      // Cálculos Matemáticos Avançados
-      const lucroLiquido = totalReceita - (totalCustoProducao + despesasFixas + despesasMarketing);
-      
-      const margemLucro = totalReceita > 0 ? (lucroLiquido / totalReceita) * 100 : 0;
-      const ticketMedio = numPedidos > 0 ? totalReceita / numPedidos : 0;
-      const roiMateriais = totalCustoProducao > 0 ? ((totalReceita - totalCustoProducao) / totalCustoProducao) * 100 : 0;
-      const capitalGiro = (caixaAtual + contasReceber) - despesasFixas;
-      
       // Assumindo despesas fixas como contas a pagar de curto prazo para métrica
-      const liquidez = despesasFixas > 0 ? contasReceber / despesasFixas : (contasReceber > 0 ? 100 : 0);
-      
+      const liquidez = despesasFixas > 0 ? aReceber / despesasFixas : (aReceber > 0 ? 100 : 0);
+
       // Sobrevivência (Runway) em meses
-      const mediaDespesasMensais = (despesasFixas + despesasMarketing + totalCustoProducao) / 3 || 1; // media simples 3 meses
-      const runway = caixaAtual > 0 ? caixaAtual / mediaDespesasMensais : 0;
+      const mediaDespesasMensais = (despesasFixas + despesasMarketing + despesasMateriaPrima) / 3 || 1; // media simples 3 meses
+      const runway = saldoCaixa > 0 ? saldoCaixa / mediaDespesasMensais : 0;
 
       // Giro de estoque (CMV / Estoque médio)
-      const giroEstoque = valorTotalEstoque > 0 ? totalCustoProducao / valorTotalEstoque : 0;
-      
+      const giroEstoque = valorTotalEstoque > 0 ? despesasMateriaPrima / valorTotalEstoque : 0;
+
       // CAC (apenas simulativo baseando em nº pedidos)
-      const cac = numPedidos > 0 ? despesasMarketing / numPedidos : 0;
+      const cac = totalPedidos > 0 ? despesasMarketing / totalPedidos : 0;
 
       setMetrics({
         margemLucro,
@@ -172,19 +91,7 @@ export default function EvolucaoPage() {
         cac
       });
 
-      // Format Chart Data
-      const formattedChart = Object.keys(pedidosAgrupadosPorMes).map(mes => ({
-        mes,
-        receita: pedidosAgrupadosPorMes[mes].receita,
-        despesa: pedidosAgrupadosPorMes[mes].despesa,
-      })).sort((a, b) => {
-        // Basic sort por string "MM/YYYY" (ideal: conversão pra data real)
-        const [m1, y1] = a.mes.split('/');
-        const [m2, y2] = b.mes.split('/');
-        return new Date(Number(y1), Number(m1) - 1).getTime() - new Date(Number(y2), Number(m2) - 1).getTime();
-      });
-
-      setChartData(formattedChart);
+      setChartData(data.monthlySeries);
 
     } catch (error) {
       console.error("Erro ao carregar dados financeiros:", error);

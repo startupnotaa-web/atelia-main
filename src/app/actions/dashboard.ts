@@ -54,6 +54,12 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
     // 2. Process Finance Entries
     let totalManualIncome = 0;
     let totalManualExpense = 0;
+    // Quebra de despesas por categoria — usada pelas métricas avançadas da
+    // Evolução (roiMateriais, cac, giroEstoque), calculada aqui para as duas
+    // telas lerem exatamente a mesma soma (ver INTEGRATION_BLUEPRINT.md §2.8).
+    let despesasMateriaPrima = 0;
+    let despesasMarketing = 0;
+    let despesasFixas = 0;
     const allFinanceEntries: FinanceEntry[] = [];
     let currentMonthRevenue = 0;
     const currentMonthStr = new Date().toISOString().substring(0, 7);
@@ -83,6 +89,13 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
       if (data.type === 'saida') {
         if (isWithinPeriod(entryDate, periodFilter)) {
           totalManualExpense += data.value;
+          if (data.category === 'Matéria-prima') {
+            despesasMateriaPrima += data.value;
+          } else if (data.category === 'Marketing' || data.category === 'Marketing / Embalagem') {
+            despesasMarketing += data.value;
+          } else {
+            despesasFixas += data.value;
+          }
         }
       }
     });
@@ -93,10 +106,15 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
     // 3. Initialize Evolution Chart
     let totalReceivedFromOrders = 0;
     const monthlyProfit: Record<string, number> = {};
+    // Quebra receita/despesa por mês, para o gráfico de 2 séries da Evolução
+    // (a Dashboard usa só monthlyProfit/evolutionChartData, líquido) — mesmos
+    // loops abaixo, sem nenhuma leitura adicional ao Firestore.
+    const monthlySeries: Record<string, { receita: number; despesa: number }> = {};
     const currentYear = new Date().getFullYear();
     for (let i = 1; i <= 12; i++) {
       const monthStr = `${currentYear}-${i.toString().padStart(2, '0')}`;
       monthlyProfit[monthStr] = 0;
+      monthlySeries[monthStr] = { receita: 0, despesa: 0 };
     }
 
     // 4. Process Orders
@@ -126,17 +144,25 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
       const isFaturamentoInRange = isWithinPeriod(orderDate, periodFilter);
       const isReceberInRange = isWithinPeriod(orderDeadline, periodFilter);
 
-      if (isFaturamentoInRange) {
+      // Faturamento/Lucro só reconhecem pedidos efetivamente pagos — um
+      // orçamento convertido nasce com statusPagamento 'pendente' (motor de
+      // vendas, src/app/actions/sales.ts) e não deve inflar essas métricas
+      // antes de a artesã realmente receber (INTEGRATION_BLUEPRINT.md, Fase 5).
+      // Legado sem statusPagamento usa o paymentStatus antigo ('paid').
+      const isNovoSchema = !!(data.status || data.statusProducao || data.statusPagamento);
+      const isPago = isNovoSchema ? data.statusPagamento === 'pago' : data.paymentStatus === 'paid';
+
+      if (isFaturamentoInRange && isPago) {
         faturamentoBruto += v;
         custoProducaoTotal += custo;
       }
-      
-      if (data.status || data.statusProducao || data.statusPagamento) {
+
+      if (isNovoSchema) {
         // Novo Schema
         let pago = 0;
         if (data.statusPagamento === 'pago') pago = v;
         else if (data.statusPagamento === 'sinal') pago = v / 2;
-        
+
         if (isFaturamentoInRange) {
           totalReceivedFromOrders += pago;
         }
@@ -146,7 +172,10 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
             monthlyProfit[orderMonthStr] = 0;
           }
           monthlyProfit[orderMonthStr] += pago;
-          
+
+          if (!monthlySeries[orderMonthStr]) monthlySeries[orderMonthStr] = { receita: 0, despesa: 0 };
+          monthlySeries[orderMonthStr].receita += pago;
+
           if (orderMonthStr === currentMonthStr) {
             currentMonthRevenue += pago;
           }
@@ -221,6 +250,8 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
           } else {
             monthlyProfit[monthStr] = amount;
           }
+          if (!monthlySeries[monthStr]) monthlySeries[monthStr] = { receita: 0, despesa: 0 };
+          monthlySeries[monthStr].receita += amount;
           if (monthStr === currentMonthStr) {
             currentMonthRevenue += amount;
           }
@@ -232,14 +263,21 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
       if (data.date) {
         const monthStr = data.date.substring(0, 7);
         if (monthlyProfit[monthStr] === undefined) monthlyProfit[monthStr] = 0;
-        
-        if (data.type === 'entrada') {
+        if (!monthlySeries[monthStr]) monthlySeries[monthStr] = { receita: 0, despesa: 0 };
+
+        // Mesma exclusão de entradas-espelho de pedido usada acima (linha ~74)
+        // — sem isso, cada venda paga via registrarVenda entrava aqui de novo
+        // (uma vez pelo pedido/`pago`, outra pela entrada financeira espelho),
+        // dobrando o valor no gráfico "Evolução Mensal (Caixa)" da Dashboard.
+        if (data.type === 'entrada' && !data.pedidoId) {
           monthlyProfit[monthStr] += data.value;
+          monthlySeries[monthStr].receita += data.value;
           if (monthStr === currentMonthStr) {
             currentMonthRevenue += data.value;
           }
-        } else {
+        } else if (data.type === 'saida') {
           monthlyProfit[monthStr] -= data.value;
+          monthlySeries[monthStr].despesa += data.value;
         }
       }
     });
@@ -248,8 +286,13 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([mes, lucro]) => ({ mes, lucro }));
 
+    const monthlySeriesData = Object.entries(monthlySeries)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([mes, valores]) => ({ mes, receita: valores.receita, despesa: valores.despesa }));
+
     // 5. Estoque and Pronta-Entrega Calculations
     let estoqueCritico = 0;
+    let valorTotalEstoque = 0;
     estoqueSnap.forEach(doc => {
       const data = doc.data();
       // `currentStock` é o campo canônico (src/lib/erpTypes.ts EstoqueItem); os
@@ -259,6 +302,11 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
       if (stock <= alertQty) {
         estoqueCritico++;
       }
+
+      const quantidadeTotal = data.quantidadeTotal ?? data.quantity ?? 0;
+      const custoTotal = data.custoTotal ?? data.price ?? 0;
+      const custoMedioUnitario = quantidadeTotal > 0 ? custoTotal / quantidadeTotal : 0;
+      valorTotalEstoque += stock * custoMedioUnitario;
     });
 
     let prontaEntregaItems = 0;
@@ -285,13 +333,19 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
         prontaEntregaItems,
         pedidosFila,
         pedidosProducao,
-        currentMonthRevenue
+        currentMonthRevenue,
+        despesasMateriaPrima,
+        despesasMarketing,
+        despesasFixas,
+        valorTotalEstoque,
+        totalPedidos: pedidosSnap.size
       },
       recentExpenses,
       pendingOrders: pendingOrders.sort((a, b) => new Date(a.deadline || a.data || 0).getTime() - new Date(b.deadline || b.data || 0).getTime()).slice(0, 5),
       initialBalance,
       topProduct,
       evolutionChartData,
+      monthlySeries: monthlySeriesData,
       onboarding: {
         hasEstoque: estoqueSnap.size > 0,
         hasCatalogo: catalogoSnap.size > 0,
@@ -305,12 +359,18 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
     // Fallback vazio
     return {
       plan: 'free',
-      metrics: { faturamentoBruto: 0, recebido: 0, aReceber: 0, saldoCaixa: 0, lucroLiquido: 0, pedidosPendentes: 0, estoqueCritico: 0, prontaEntregaItems: 0, pedidosFila: 0, pedidosProducao: 0, currentMonthRevenue: 0 },
+      metrics: {
+        faturamentoBruto: 0, recebido: 0, aReceber: 0, saldoCaixa: 0, lucroLiquido: 0,
+        pedidosPendentes: 0, estoqueCritico: 0, prontaEntregaItems: 0, pedidosFila: 0,
+        pedidosProducao: 0, currentMonthRevenue: 0, despesasMateriaPrima: 0,
+        despesasMarketing: 0, despesasFixas: 0, valorTotalEstoque: 0, totalPedidos: 0
+      },
       recentExpenses: [],
       pendingOrders: [],
       initialBalance: 0,
       topProduct: null,
       evolutionChartData: [],
+      monthlySeries: [],
       onboarding: { hasEstoque: false, hasCatalogo: false, hasPedidos: false },
       monthlyGoal: 0
     };

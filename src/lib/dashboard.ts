@@ -18,6 +18,16 @@ export type DashboardMetrics = {
   pedidosProducao: number;
   pedidosFila: number;
   currentMonthRevenue: number;
+  /** Soma de `finance_entries` saida com categoria "Matéria-prima" (compra de insumos). */
+  despesasMateriaPrima: number;
+  /** Soma de `finance_entries` saida com categoria "Marketing"/"Marketing / Embalagem". */
+  despesasMarketing: number;
+  /** Soma de `finance_entries` saida de qualquer outra categoria. */
+  despesasFixas: number;
+  /** Valor do estoque de insumos parado (currentStock × custo médio unitário, por item). */
+  valorTotalEstoque: number;
+  /** Total de documentos em `pedidos` (qualquer status), usado para ticket médio/CAC. */
+  totalPedidos: number;
 };
 
 export type TopProduct = {
@@ -31,6 +41,13 @@ export type EvolutionData = {
   lucro: number;
 };
 
+/** Receita vs despesa por mês — série própria da página /evolucao (gráfico de 2 linhas). */
+export type MonthlySeriesData = {
+  mes: string;
+  receita: number;
+  despesa: number;
+};
+
 export type DashboardData = {
   plan: string;
   metrics: DashboardMetrics;
@@ -39,6 +56,7 @@ export type DashboardData = {
   initialBalance: number;
   topProduct: TopProduct | null;
   evolutionChartData: EvolutionData[];
+  monthlySeries: MonthlySeriesData[];
   onboarding: {
     hasEstoque: boolean;
     hasCatalogo: boolean;
