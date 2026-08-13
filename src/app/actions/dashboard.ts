@@ -248,7 +248,9 @@ export async function fetchDashboardData(userId: string, periodFilter?: { start:
     let estoqueCritico = 0;
     estoqueSnap.forEach(doc => {
       const data = doc.data();
-      const stock = data.currentStock ?? data.quantidadeTotal ?? data.quantity ?? data.purchasedQuantity ?? 0;
+      // `currentStock` é o campo canônico (src/lib/erpTypes.ts EstoqueItem); os
+      // demais são aliases legados de escritores antigos (ver INTEGRATION_BLUEPRINT.md §2.2).
+      const stock = data.currentStock ?? data.quantidadeTotal ?? data.quantity ?? data.quantidade ?? data.purchasedQuantity ?? 0;
       const alertQty = data.lowStockAlert ?? 0;
       if (stock <= alertQty) {
         estoqueCritico++;

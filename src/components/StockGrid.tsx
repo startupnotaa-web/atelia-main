@@ -5,17 +5,12 @@ import { Plus, X, AlertTriangle, Package, Trash2 } from 'lucide-react';
 import { db, auth } from '@/lib/firebase';
 import { collection, query, where, onSnapshot, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import type { EstoqueItem } from '@/lib/erpTypes';
 
-type Material = {
-  id: string;
-  nome: string;
-  custoTotal: number;
-  quantidadeTotal: number;
-  unidadeMedida: string;
-  lowStockAlert?: number;
-  currentStock?: number;
-  linkedFinanceEntryId?: string;
-};
+// StockGrid é o dono canônico da coleção `estoque` — o tipo vem de erpTypes.ts
+// para que qualquer outro leitor/escritor (Calculadora, Dashboard, /pedidos)
+// seja forçado a concordar com o mesmo formato de documento.
+type Material = EstoqueItem;
 
 export default function StockGrid() {
   const [dbMaterials, setDbMaterials] = useState<Material[]>([]);
@@ -34,6 +29,7 @@ export default function StockGrid() {
               const data = docSnap.data();
               items.push({
                 id: docSnap.id,
+                userId: data.userId || user.uid,
                 nome: data.nome || data.name || 'Sem Nome',
                 unidadeMedida: data.unidadeMedida || data.unit || 'un',
                 custoTotal: data.custoTotal || data.price || data.totalCost || 0,

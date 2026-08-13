@@ -13,6 +13,7 @@ import LimitModal from '@/components/LimitModal';
 import Tooltip from '@/components/Tooltip';
 import CostReceipt from '@/components/CostReceipt';
 import { calculatePricing, calculateReverseMargin, calculateCostPerHour, calculateToolDepreciationCost, roundCents, MARGEM_SEGURA_MINIMA_PERCENT } from '@/lib/pricingEngine';
+import type { Pedido, PaymentStatus, ProductionStatus } from '@/lib/erpTypes';
 
 interface Material {
   id: string;
@@ -449,34 +450,30 @@ export default function CalculadoraPage() {
     try {
       const batch = writeBatch(db);
       const dataAtualIso = new Date().toISOString();
-      
-      let paymentStatus = 'pending';
-      let paidValue = 0;
-      let remainingValue = precoFinalExibido;
 
-      if (statusPedido === 'finished') {
-        paymentStatus = 'paid';
-        paidValue = precoFinalExibido;
-        remainingValue = 0;
-      }
+      // Status canônicos do Kanban de /pedidos (src/lib/erpTypes.ts) — o campo
+      // legado `status` nunca é agrupado pelo Kanban (INTEGRATION_BLUEPRINT.md §2.3).
+      const statusProducao: ProductionStatus =
+        statusPedido === 'queue' ? 'fila' : statusPedido === 'production' ? 'producao' : 'finalizado';
+      const statusPagamento: PaymentStatus = statusPedido === 'finished' ? 'pago' : 'pendente';
 
       // 1. Gravar a Venda na coleção 'pedidos' (Single Source of Truth)
       const novaVendaRef = doc(collection(db, 'pedidos'));
 
-      const pedido = {
+      const pedido: Partial<Pedido> = {
         userId: user.uid,
         cliente: nomeCliente.trim() || 'Cliente Balcão',
-        produto: nomeDaPeca || 'Peça sem nome',
-        valor: precoFinalExibido,
+        produtoNome: nomeDaPeca || 'Peça sem nome',
+        valorFinal: precoFinalExibido,
         custo: custoBaseTotal,
         lucro: lucroExibido,
-        precoAjustadoManualmente: isPrecoOverridden,
-        status: statusPedido === 'queue' ? 'pendente' : statusPedido === 'production' ? 'em_producao' : 'concluido',
+        statusProducao,
+        statusPagamento,
         data: dataAtualIso,
-        createdAt: serverTimestamp()
+        origem: 'calculadora',
       };
 
-      batch.set(novaVendaRef, pedido);
+      batch.set(novaVendaRef, { ...pedido, precoAjustadoManualmente: isPrecoOverridden, createdAt: serverTimestamp() });
 
       // 2. Gravar Transação Financeira na coleção 'transactions' APENAS se estiver pago
       if (statusPedido === 'finished') {
@@ -490,14 +487,18 @@ export default function CalculadoraPage() {
         });
       }
 
-      // 3. Baixa Automática no Estoque
+      // 3. Baixa Automática no Estoque — grava exclusivamente no campo canônico
+      // `currentStock` (EstoqueItem, src/lib/erpTypes.ts). Antes desta correção
+      // a baixa ia para um campo `quantidade` que a tela /estoque nunca lê e
+      // que o alerta de estoque crítico da Dashboard não enxergava
+      // (INTEGRATION_BLUEPRINT.md §2.2).
       materiais.forEach((mat) => {
         if (mat.estoqueId) {
           const qtdGasta = parseFloat(mat.quantidade) || 0;
           if (qtdGasta > 0) {
             const estoqueRef = doc(db, 'estoque', mat.estoqueId);
             batch.update(estoqueRef, {
-              quantidade: increment(-qtdGasta)
+              currentStock: increment(-qtdGasta)
             });
           }
         }
