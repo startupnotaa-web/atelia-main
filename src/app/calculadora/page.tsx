@@ -10,6 +10,9 @@ import toast, { Toaster } from 'react-hot-toast';
 import { uploadImage } from '@/app/actions/upload-image';
 import { fetchUserLimitsAction } from '@/app/actions/user';
 import LimitModal from '@/components/LimitModal';
+import Tooltip from '@/components/Tooltip';
+import CostReceipt from '@/components/CostReceipt';
+import { calculatePricing } from '@/lib/pricingEngine';
 
 interface Material {
   id: string;
@@ -93,11 +96,15 @@ export default function CalculadoraPage() {
   const [materiais, setMateriais] = useState<any[]>([{ id: '1', nome: '', custo: '', quantidade: '1', isEstoque: false, custoUnitario: 0 }]);
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([{ id: '1', nome: '', valorCompra: '', vidaUtil: '', tempoUso: '', custo: '0' }]);
   
+  // 3b. Taxa de desperdício (perda de material)
+  const [taxaDesperdicio, setTaxaDesperdicio] = useState('0');
+
   // 4. Custos Fixos e Embalagens
   const [aluguel, setAluguel] = useState('0');
   const [aguaLuz, setAguaLuz] = useState('0');
   const [internet, setInternet] = useState('0');
   const [embalagens, setEmbalagens] = useState('0');
+  const [frete, setFrete] = useState('0');
 
   // 5. Taxas e Margem
   const [margemLucro, setMargemLucro] = useState('30');
@@ -199,49 +206,60 @@ export default function CalculadoraPage() {
     }
   };
 
-  // --- CÁLCULOS MATEMÁTICOS ---
+  // --- CÁLCULOS MATEMÁTICOS (motor centralizado em src/lib/pricingEngine.ts) ---
   const parsedProLabore = parseFloat(proLabore) || 0;
-  // Fallback de segurança matemático (160h) para evitar divisão por zero/NaN
   const parsedHorasMes = parseFloat(horasMes) || 160;
-  const valorHoraCalculado = parsedProLabore / parsedHorasMes;
-
   const parsedHoras = parseFloat(tempoHoras) || 0;
   const parsedMinutos = parseFloat(tempoMinutos) || 0;
-  const custoMaoDeObra = ((parsedHoras * 60) + parsedMinutos) * (valorHoraCalculado / 60);
-  
-  const custoMateriais = materiais.reduce((acc, mat) => {
-    const qty = parseFloat(mat.quantidade) || 0;
-    // Se for do estoque, multiplica o custo base (já calculado) pela quantidade gasta.
-    const custoItem = mat.isEstoque 
-      ? (qty * (parseFloat(mat.valorBaseUnidade) || 0)) 
-      : (parseFloat(mat.custo) || 0);
-    return acc + custoItem;
-  }, 0);
+  const tempoTotalEmHoras = parsedHoras + (parsedMinutos / 60);
 
-  const custoFerramentas = ferramentas.reduce((acc, fer) => {
+  const materiaisParaEngine = materiais.map((mat) => {
+    const qty = parseFloat(mat.quantidade) || 0;
+    const custoTotal = mat.isEstoque
+      ? (qty * (parseFloat(mat.valorBaseUnidade) || 0))
+      : (parseFloat(mat.custo) || 0);
+    return { custoTotal };
+  });
+
+  const ferramentasParaEngine = ferramentas.map((fer) => {
     const vc = parseFloat(fer.valorCompra) || 0;
     const vu = parseFloat(fer.vidaUtil) || 1;
     const tu = parseFloat(fer.tempoUso) || 0;
-    const custoCalc = fer.equipamentoId ? (parseFloat(fer.custoDesgaste || '0') * tu) : ((vc / vu) * tu);
-    return acc + custoCalc;
-  }, 0);
-  const custoFixoMensal = (parseFloat(aluguel) || 0) + (parseFloat(aguaLuz) || 0) + (parseFloat(internet) || 0);
-  const tempoTotalEmHoras = parsedHoras + (parsedMinutos / 60);
-  const custoFixoTotal = (custoFixoMensal / parsedHorasMes) * tempoTotalEmHoras;
-  const custoEmbalagens = parseFloat(embalagens) || 0;
-  
-  const custoBaseTotal = custoMaoDeObra + custoMateriais + custoFerramentas + custoFixoTotal + custoEmbalagens;
-  
+    const custoTotal = fer.equipamentoId ? (parseFloat(fer.custoDesgaste || '0') * tu) : ((vc / vu) * tu);
+    return { custoTotal };
+  });
+
   const margem = parseFloat(margemLucro) || 0;
   const maquininha = parseFloat(taxaMaquininha) || 0;
   const plataforma = parseFloat(comissaoPlataforma) || 0;
   const imp = parseFloat(imposto) || 0;
-  const somaPercentuais = margem + maquininha + plataforma + imp;
 
-  const divisorMarkup = 1 - (somaPercentuais / 100);
-  const precoIdealVenda = divisorMarkup > 0 ? (custoBaseTotal / divisorMarkup) : 0;
-  const precoFinalVenda = isRounded ? Math.ceil(precoIdealVenda) : precoIdealVenda;
-  const lucroAtelie = precoFinalVenda * (margem / 100);
+  const resultado = calculatePricing({
+    proLaboreMensal: parsedProLabore,
+    horasTrabalhadasMes: parsedHorasMes,
+    horasGastasPeca: tempoTotalEmHoras,
+    materiais: materiaisParaEngine,
+    taxaDesperdicioPercent: parseFloat(taxaDesperdicio) || 0,
+    ferramentas: ferramentasParaEngine,
+    custosFixosMensais: (parseFloat(aluguel) || 0) + (parseFloat(aguaLuz) || 0) + (parseFloat(internet) || 0),
+    embalagem: parseFloat(embalagens) || 0,
+    frete: parseFloat(frete) || 0,
+    taxaCartaoPercent: maquininha,
+    comissaoPlataformaPercent: plataforma,
+    impostoPercent: imp,
+    margemLucroPercent: margem,
+    arredondarPrecoFinal: isRounded,
+  });
+
+  const valorHoraCalculado = resultado.valorHora;
+  const custoMaoDeObra = resultado.custoMaoDeObra;
+  const custoFixoTotal = resultado.custoFixoRateado;
+  const custoEmbalagens = resultado.custoEmbalagemFrete;
+  const custoBaseTotal = resultado.custoBaseTotal;
+  const somaPercentuais = resultado.somaPercentuais;
+  const divisorMarkup = resultado.divisorMarkup;
+  const precoFinalVenda = resultado.precoFinalVenda;
+  const lucroAtelie = resultado.lucroReal;
 
   // --- FUNÇÕES DE LISTAS ---
   const handleMaterialChange = (id: string, campo: string, valor: string) => {
@@ -314,6 +332,8 @@ export default function CalculadoraPage() {
     detalhesCalculo: {
       maoDeObra: custoMaoDeObra,
       materiais: materiais.filter(m => m.nome.trim() || m.custo),
+      taxaDesperdicio: parseFloat(taxaDesperdicio) || 0,
+      custoDesperdicio: resultado.custoDesperdicio,
       ferramentas: ferramentas.filter(f => f.nome.trim() || f.custo),
       custosFixos: custoFixoTotal,
       embalagens: custoEmbalagens,
@@ -599,7 +619,10 @@ export default function CalculadoraPage() {
                   </div>
                 </div>
                 <div className="bg-surface px-5 py-3 rounded-xl border-2 border-primary/40 shadow-sm text-center">
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Custo da sua Hora</p>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1 flex items-center justify-center gap-1.5">
+                    Custo da sua Hora
+                    <Tooltip text="Valor da Hora: seu salário desejado por mês dividido pelas horas que você trabalha por mês. É quanto cada hora do seu tempo vale dentro do preço da peça." />
+                  </p>
                   <p className="text-xl font-black text-primary">{formatCurrency(valorHoraCalculado)}/h</p>
                 </div>
               </div>
@@ -684,6 +707,19 @@ export default function CalculadoraPage() {
               <button onClick={() => setMateriais([...materiais, { id: Date.now().toString(), nome: '', custo: '', quantidade: '1', isEstoque: false, custoUnitario: 0 }])} className="text-foreground font-bold hover:text-primary flex items-center gap-1 bg-background border-2 border-border px-4 py-2.5 rounded-xl transition-colors">
                 <Plus size={18} /> Adicionar Material
               </button>
+
+              <div className="mt-6 pt-6 border-t-2 border-border border-dashed flex items-end gap-4">
+                <div className="w-40">
+                  <label className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                    Taxa de Desperdício (%)
+                    <Tooltip text="Nem todo material vira peça acabada — sobras, cortes errados e testes também custam. Essa % é aplicada sobre o custo dos materiais para cobrir essa perda." />
+                  </label>
+                  <input type="number" min="0" step="0.1" value={taxaDesperdicio} onChange={e => setTaxaDesperdicio(e.target.value)} className={inputBase} />
+                </div>
+                <div className="text-sm text-slate-500 font-medium pb-3">
+                  Custo extra de desperdício: <span className="font-black text-slate-700">{formatCurrency(resultado.custoDesperdicio)}</span>
+                </div>
+              </div>
             </section>
 
             {/* Passo 3b: Ferramentas */}
@@ -759,8 +795,11 @@ export default function CalculadoraPage() {
 
             {/* Passo 5: Custos Fixos e Embalagens */}
             <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
-              <StepHeader num={5} title="Custos do ateliê e embalagem" subtitle="Uma parte proporcional do aluguel, luz e internet entra em cada peça." />
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="flex items-start gap-2">
+                <StepHeader num={5} title="Custos do ateliê, embalagem e frete" subtitle="Uma parte proporcional do aluguel, luz e internet entra em cada peça (rateio)." />
+                <Tooltip text="Rateio de Custos Fixos: suas contas do mês (aluguel, luz, internet) não pertencem a uma peça só — dividimos esse valor pelas horas trabalhadas no mês e cobramos apenas a fatia proporcional ao tempo gasto nesta peça." />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">Aluguel (R$)</label>
                   <input type="number" step="0.01" value={aluguel} onChange={e => setAluguel(e.target.value)} className={inputBase} />
@@ -777,12 +816,22 @@ export default function CalculadoraPage() {
                   <label className="block text-sm font-bold text-slate-700 mb-2">Embalagens (R$)</label>
                   <input type="number" step="0.01" value={embalagens} onChange={e => setEmbalagens(e.target.value)} className={inputBase} />
                 </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Frete (R$)</label>
+                  <input type="number" step="0.01" value={frete} onChange={e => setFrete(e.target.value)} className={inputBase} />
+                </div>
+              </div>
+              <div className="mt-4 text-sm text-slate-500 font-medium">
+                Rateio desta peça: <span className="font-black text-slate-700">{formatCurrency(custoFixoTotal)}</span>
               </div>
             </section>
 
             {/* Passo 6: Lucro e Taxas */}
             <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
-              <StepHeader num={6} title="Quanto você quer ganhar?" subtitle="Defina seu lucro e as taxas que você paga. Tudo já entra embutido no preço final." />
+              <div className="flex items-start gap-2">
+                <StepHeader num={6} title="Quanto você quer ganhar?" subtitle="Defina seu lucro e as taxas que você paga. Tudo já entra embutido no preço final." />
+                <Tooltip text="Markup: o preço final é calculado como Custo Total ÷ (1 − soma das porcentagens). Assim, lucro, maquininha, plataforma e imposto saem sempre do preço de venda, e não do seu custo — ninguém fica no prejuízo." />
+              </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
@@ -825,22 +874,8 @@ export default function CalculadoraPage() {
               <div className="p-6 space-y-5">
 
                 <div className="space-y-3 pb-4 border-b-2 border-border border-dashed">
-                  <div className="flex justify-between items-center text-sm font-medium">
-                    <span className="text-slate-500">Mão de Obra</span>
-                    <span className="text-slate-700">{formatCurrency(custoMaoDeObra)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm font-medium">
-                    <span className="text-slate-500">Materiais</span>
-                    <span className="text-slate-700">{formatCurrency(custoMateriais)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm font-medium">
-                    <span className="text-slate-500">Ferramentas</span>
-                    <span className="text-slate-700">{formatCurrency(custoFerramentas)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm font-medium">
-                    <span className="text-slate-500">Fixos & Embalagens</span>
-                    <span className="text-slate-700">{formatCurrency(custoFixoTotal + custoEmbalagens)}</span>
-                  </div>
+                  <p className="text-xs font-black text-slate-500 uppercase tracking-wider mb-1">Recibo de Custos</p>
+                  <CostReceipt items={resultado.breakdown} total={precoFinalVenda} />
                   <div className="flex justify-between items-center pt-2 bg-background rounded-xl px-3 py-2.5 border border-border">
                     <span className="font-black text-slate-700 text-sm uppercase tracking-wider">Custo Total</span>
                     <span className="font-black text-slate-900 text-lg">{formatCurrency(custoBaseTotal)}</span>
