@@ -5,17 +5,20 @@ import { Download, MessageCircle, Plus, X, Loader2 } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { fetchClientsForQuotes, fetchProductsForQuotes, registerPdfGeneration } from '@/app/actions/quotes';
+import { fetchClientsForQuotes, fetchProductsForQuotes, registerPdfGeneration, criarOrcamento } from '@/app/actions/quotes';
 import type { QuoteClient, QuoteProduct } from '@/app/actions/quotes';
 import toast from 'react-hot-toast';
 import { fetchUserLimitsAction } from '@/app/actions/user';
 import LimitModal from '@/components/LimitModal';
+import { roundCents } from '@/lib/pricingEngine';
 
 type OrcamentoItem = {
   id: string;
   name: string;
   quantity: number;
   unitPrice: number;
+  /** Custo de produção unitário (catalogo.custoBase) — segue no orçamento até a conversão em pedido. */
+  unitCost: number;
   total: number;
 };
 
@@ -36,7 +39,20 @@ export default function GerarOrcamento() {
 
   const [isExporting, setIsExporting] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
-  
+
+  // Orçamento já persistido no Firestore, e a "assinatura" dos dados que ele
+  // representa — evita duplicar o registro a cada novo clique em "Baixar
+  // PDF"/"Enviar por WhatsApp" para o mesmo orçamento, mas salva de novo se
+  // cliente/itens/desconto/prazo mudarem. Comparado durante o render (não via
+  // efeito) para não disparar um setState síncrono dentro de um useEffect.
+  const [savedOrcamento, setSavedOrcamento] = useState<{ id: string; signature: string } | null>(null);
+  const orcamentoSignature = JSON.stringify({
+    clientId: selectedClient?.id,
+    items: items.map(i => ({ id: i.id, quantity: i.quantity, unitPrice: i.unitPrice, unitCost: i.unitCost })),
+    desconto,
+    prazoEntrega,
+  });
+
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
@@ -98,6 +114,7 @@ export default function GerarOrcamento() {
         name: product.nome,
         quantity: 1,
         unitPrice: product.precoFinal,
+        unitCost: product.custoBase,
         total: product.precoFinal
       };
       setItems([...items, newItem]);
@@ -139,6 +156,36 @@ export default function GerarOrcamento() {
         }
         setIsExporting(false);
         return;
+      }
+
+      // Persiste o orçamento no Firestore antes de gerar o PDF — sem isso ele
+      // vira um PDF solto, sem histórico e sem caminho de conversão em pedido
+      // (INTEGRATION_BLUEPRINT.md §2.7). Não bloqueia a exportação se falhar.
+      if (!savedOrcamento || savedOrcamento.signature !== orcamentoSignature) {
+        const custoTotal = roundCents(items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0));
+        const orcamentoResult = await criarOrcamento({
+          userId: user.uid,
+          clienteId: selectedClient.id,
+          clienteNome: selectedClient.name,
+          clienteTelefone: selectedClient.phone,
+          itens: items.map(item => ({
+            produtoId: item.id,
+            nome: item.name,
+            quantidade: item.quantity,
+            precoUnitario: item.unitPrice,
+            custoUnitario: item.unitCost,
+          })),
+          desconto: valorDesconto,
+          prazoEntregaDias: prazoEntrega ? Number(prazoEntrega) : undefined,
+          valorFinal: totalComDesconto,
+          custoTotal,
+        });
+        if (orcamentoResult.success && orcamentoResult.id) {
+          setSavedOrcamento({ id: orcamentoResult.id, signature: orcamentoSignature });
+        } else {
+          console.error('Falha ao salvar orçamento:', orcamentoResult.error);
+          toast.error('O orçamento não pôde ser salvo no histórico, mas o PDF será gerado normalmente.');
+        }
       }
 
       if (!pdfRef.current) throw new Error("Elemento do PDF não encontrado.");

@@ -12,6 +12,7 @@ const CATEGORIA_FINANCEIRA_POR_ORIGEM: Record<OrigemVenda, string> = {
   whatsapp: 'Venda WhatsApp',
   consignacao: 'Venda Consignada',
   calculadora: 'Venda Calculadora',
+  orcamento: 'Venda via Orçamento',
 };
 
 /**
@@ -28,10 +29,14 @@ const CATEGORIA_FINANCEIRA_POR_ORIGEM: Record<OrigemVenda, string> = {
  *      `estoque_pronto.quantidadeDisponivel` para peças prontas).
  *   B) Cria o pedido com o schema canônico (`Pedido` em erpTypes.ts):
  *      statusProducao/statusPagamento, custo e lucro.
- *   C) Cria a entrada em `finance_entries` (schema: value/entrada), vinculada
+ *   C) Se a venda já está paga (`statusPagamento` 'pago', o default), cria a
+ *      entrada espelho em `finance_entries` (schema: value/entrada), vinculada
  *      ao pedido via `pedidoId` — essa vinculação é o que permite a Dashboard
  *      e a Evolução ignorá-la ao somar receita "manual", evitando contar a
  *      mesma venda duas vezes (uma pelo pedido pago, outra pela entrada).
+ *      Pedidos que nascem 'pendente'/'sinal' (ex: orçamento convertido em
+ *      encomenda) NÃO geram entrada financeira agora — não houve dinheiro
+ *      ainda, e um `type: 'entrada'` aqui seria simplesmente falso.
  *
  * O motor confia no `valorTotal`/`custoTotal`/`item.custoUnitario` informados
  * pelo chamador — resolver custo (ex: buscar `custoBase` no catálogo quando a
@@ -63,7 +68,8 @@ export async function registrarVenda(payload: RegistrarVendaPayload): Promise<Re
 
     const db = getAdminDb();
     const pedidoRef = db.collection('pedidos').doc();
-    const financeRef = db.collection('finance_entries').doc();
+    const statusPagamento = payload.statusPagamento || 'pago';
+    const financeRef = statusPagamento === 'pago' ? db.collection('finance_entries').doc() : null;
 
     const itensComEstoque: ItemVenda[] = payload.itens.filter((item) => !!item.estoqueId);
     const itensProntaEntrega = itensComEstoque.filter((item) => (item.tipoEstoque ?? 'pronta_entrega') === 'pronta_entrega');
@@ -109,7 +115,7 @@ export async function registrarVenda(payload: RegistrarVendaPayload): Promise<Re
         valorFinal: payload.valorTotal,
         custo: payload.custoTotal,
         lucro,
-        statusPagamento: payload.statusPagamento || 'pago',
+        statusPagamento,
         statusProducao: payload.statusProducao || 'entregue',
         formaPagamento: payload.formaPagamento,
         origem: payload.origem,
@@ -124,19 +130,22 @@ export async function registrarVenda(payload: RegistrarVendaPayload): Promise<Re
         ...(payload.metadados || {}),
       });
 
-      // 2C. ESCRITA — Financeiro. `pedidoId` marca esta entrada como espelho
-      // da receita do pedido acima (não uma receita independente), para a
-      // Dashboard/Evolução não somarem a mesma venda duas vezes.
-      tx.set(financeRef, {
-        userId: payload.userId,
-        type: 'entrada',
-        category: CATEGORIA_FINANCEIRA_POR_ORIGEM[payload.origem],
-        value: payload.valorTotal,
-        description: payload.descricaoFinanceira || `Venda registrada (${payload.origem}) — ${nomeDoPedido}`,
-        date: new Date().toISOString().split('T')[0],
-        createdAt: new Date().toISOString(),
-        pedidoId: pedidoRef.id,
-      });
+      // 2C. ESCRITA — Financeiro, só quando a venda já está paga. `pedidoId`
+      // marca esta entrada como espelho da receita do pedido acima (não uma
+      // receita independente), para a Dashboard/Evolução não somarem a mesma
+      // venda duas vezes.
+      if (financeRef) {
+        tx.set(financeRef, {
+          userId: payload.userId,
+          type: 'entrada',
+          category: CATEGORIA_FINANCEIRA_POR_ORIGEM[payload.origem],
+          value: payload.valorTotal,
+          description: payload.descricaoFinanceira || `Venda registrada (${payload.origem}) — ${nomeDoPedido}`,
+          date: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString(),
+          pedidoId: pedidoRef.id,
+        });
+      }
     });
 
     revalidatePath('/pedidos');

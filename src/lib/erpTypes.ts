@@ -100,7 +100,7 @@ export interface Pedido {
 // com nomes de campo ligeiramente diferentes (a causa raiz dos gargalos
 // documentados em INTEGRATION_BLUEPRINT.md §2.2/§2.3).
 
-export type OrigemVenda = 'pdv' | 'whatsapp' | 'consignacao' | 'calculadora';
+export type OrigemVenda = 'pdv' | 'whatsapp' | 'consignacao' | 'calculadora' | 'orcamento';
 export type FormaPagamentoVenda = 'dinheiro' | 'pix' | 'cartao' | 'outro';
 
 export interface ItemVenda {
@@ -134,7 +134,12 @@ export interface RegistrarVendaPayload {
   clienteNome?: string;
   /** Nome exibido no pedido; default: nome do item único ou "N itens". */
   produtoNome?: string;
-  /** Default: 'pago' — o motor assume venda já concluída (PDV/WhatsApp/Consignação). */
+  /**
+   * Default: 'pago' — o motor assume venda já concluída (PDV/WhatsApp/Consignação).
+   * Só quando o valor final é 'pago' o motor cria a entrada espelho em
+   * `finance_entries` (dinheiro que ainda não entrou não é "entrada").
+   * Encomendas nascidas de um orçamento aprovado, por exemplo, passam 'pendente'.
+   */
   statusPagamento?: PaymentStatus;
   /** Default: 'entregue'. */
   statusProducao?: ProductionStatus;
@@ -147,4 +152,50 @@ export interface RegistrarVendaResult {
   success: boolean;
   pedidoId?: string;
   error?: string;
+}
+
+// --- Orçamentos (src/app/actions/quotes.ts, src/components/GerarOrcamento.tsx) ---
+// Fase 4 do INTEGRATION_BLUEPRINT.md: antes, um orçamento virava PDF/mensagem
+// de WhatsApp e era descartado — não existia coleção `orcamentos`, e não havia
+// como uma proposta aprovada virar venda sem redigitar tudo na Calculadora ou
+// em Pedidos, perdendo o custo já calculado (§2.7).
+
+/**
+ * `rascunho`→`enviado`→`aprovado`/`recusado`→`convertido`. `convertido` só é
+ * gravado por `converterOrcamentoEmPedido` (quotes.ts), nunca por edição
+ * manual de status — é o que impede a dupla conversão do mesmo orçamento.
+ */
+export type OrcamentoStatus = 'rascunho' | 'enviado' | 'aprovado' | 'recusado' | 'convertido';
+
+export interface OrcamentoItem {
+  produtoId?: string;
+  nome: string;
+  quantidade: number;
+  precoUnitario: number;
+  /** Custo de produção unitário no momento do orçamento (catalogo.custoBase). */
+  custoUnitario: number;
+}
+
+/** Documento da coleção `orcamentos`. */
+export interface Orcamento {
+  id: string;
+  userId: string;
+  /** Referência ao documento em `clientes`, quando o cliente já está cadastrado. */
+  clienteId?: string;
+  clienteNome: string;
+  clienteTelefone?: string;
+  itens: OrcamentoItem[];
+  desconto?: number;
+  prazoEntregaDias?: number;
+  /** Valor final proposto ao cliente (já líquido de desconto). */
+  valorFinal: number;
+  /** Soma de `custoUnitario * quantidade` dos itens — vira `custoTotal` do pedido na conversão. */
+  custoTotal: number;
+  status: OrcamentoStatus;
+  /** Data limite de validade da proposta (ISO). */
+  validade?: string;
+  /** Preenchido quando `status` vira `convertido`, linkando ao pedido gerado por registrarVenda. */
+  pedidoId?: string;
+  createdAt: unknown;
+  updatedAt?: unknown;
 }
