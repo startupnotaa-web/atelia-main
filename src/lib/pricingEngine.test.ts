@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { calculatePricing, calculateReverseMargin, roundCents, PricingEngineInput } from './pricingEngine';
+import {
+  calculatePricing,
+  calculateReverseMargin,
+  calculateCostPerHour,
+  calculateToolDepreciationCost,
+  roundCents,
+  PricingEngineInput,
+} from './pricingEngine';
 
 function baseInput(overrides: Partial<PricingEngineInput> = {}): PricingEngineInput {
   return {
@@ -156,5 +163,72 @@ describe('calculateReverseMargin (goal seek)', () => {
     const a = calculateReverseMargin(133.33, 100);
     const b = calculateReverseMargin(133.33, 100);
     expect(a).toEqual(b);
+  });
+});
+
+describe('calculateCostPerHour (depreciação de equipamento)', () => {
+  it('calcula o exemplo do enunciado: R$1500 / 10000h = R$0,15/h', () => {
+    expect(calculateCostPerHour(1500, 10000)).toBeCloseTo(0.15, 5);
+  });
+
+  it('retorna 0 com segurança quando a vida útil é zero (evita divisão por zero)', () => {
+    expect(calculateCostPerHour(1500, 0)).toBe(0);
+  });
+
+  it('retorna 0 com segurança quando a vida útil é negativa', () => {
+    expect(calculateCostPerHour(1500, -10)).toBe(0);
+  });
+
+  it('retorna 0 com segurança quando a vida útil não é um número (NaN)', () => {
+    expect(calculateCostPerHour(1500, NaN)).toBe(0);
+  });
+
+  it('mantém precisão para equipamentos de vida útil longa, sem arredondar cedo demais', () => {
+    expect(calculateCostPerHour(1500, 100000)).toBeCloseTo(0.015, 5);
+  });
+});
+
+describe('calculateToolDepreciationCost', () => {
+  it('multiplica custo por hora pelo tempo de uso na peça', () => {
+    expect(calculateToolDepreciationCost(0.15, 2)).toBe(0.3);
+  });
+
+  it('arredonda o resultado final em centavos', () => {
+    expect(calculateToolDepreciationCost(0.015, 3)).toBe(0.05); // 0.045 -> 0.05
+  });
+
+  it('retorna 0 quando o tempo de uso é zero', () => {
+    expect(calculateToolDepreciationCost(0.15, 0)).toBe(0);
+  });
+});
+
+describe('calculatePricing - ferramentas via depreciação por hora-máquina', () => {
+  it('soma a depreciação de múltiplas ferramentas ao custo total, alimentando o cálculo reverso', () => {
+    const custoMaquinaCostura = calculateToolDepreciationCost(calculateCostPerHour(1500, 10000), 2); // 0.30
+    const custoFuradeira = calculateToolDepreciationCost(calculateCostPerHour(300, 5000), 0.5); // 0.03
+
+    const input: PricingEngineInput = {
+      proLaboreMensal: 0,
+      horasTrabalhadasMes: 160,
+      horasGastasPeca: 0,
+      materiais: [{ custoTotal: 50 }],
+      taxaDesperdicioPercent: 0,
+      ferramentas: [{ custoTotal: custoMaquinaCostura }, { custoTotal: custoFuradeira }],
+      custosFixosMensais: 0,
+      embalagem: 0,
+      frete: 0,
+      taxaCartaoPercent: 0,
+      comissaoPlataformaPercent: 0,
+      impostoPercent: 0,
+      margemLucroPercent: 0,
+    };
+
+    const result = calculatePricing(input);
+    expect(result.custoFerramentas).toBeCloseTo(0.33, 5);
+    expect(result.custoBaseTotal).toBeCloseTo(50.33, 5);
+
+    // O cálculo reverso deve enxergar o custo total já incluindo a depreciação.
+    const reverso = calculateReverseMargin(70, result.custoBaseTotal);
+    expect(reverso.margemPercent).toBeCloseTo(((70 - 50.33) / 50.33) * 100, 2);
   });
 });

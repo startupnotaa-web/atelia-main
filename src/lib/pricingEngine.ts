@@ -164,6 +164,37 @@ export function calculatePricing(input: PricingEngineInput): PricingEngineResult
   };
 }
 
+export interface Equipment {
+  id: string;
+  name: string;
+  /** Preço de compra do equipamento (R$). */
+  price: number;
+  /** Vida útil estimada, em horas de uso. */
+  usefulLifeHours: number;
+  /** Derivado: price / usefulLifeHours (R$/hora de depreciação). */
+  costPerHour: number;
+}
+
+/**
+ * Deriva o custo de depreciação por hora-máquina: costPerHour = price / usefulLifeHours.
+ * Retorna 0 com segurança quando a vida útil não foi preenchida (evita divisão por zero/NaN/Infinity).
+ * Não é arredondado para centavos aqui — é uma taxa, não um valor monetário final;
+ * arredondar cedo demais perderia precisão em equipamentos de vida útil longa
+ * (ex: 1500 / 100000h = R$0,015/h).
+ */
+export function calculateCostPerHour(price: number, usefulLifeHours: number): number {
+  if (!(usefulLifeHours > 0)) return 0;
+  return (price || 0) / usefulLifeHours;
+}
+
+/**
+ * Custo de depreciação gerado por uma ferramenta/equipamento nesta peça:
+ * (tempo de uso em horas) * (custo por hora-máquina do equipamento).
+ */
+export function calculateToolDepreciationCost(costPerHour: number, hoursUsedOnPiece: number): number {
+  return roundCents((costPerHour || 0) * (hoursUsedOnPiece || 0));
+}
+
 /** Abaixo desta margem, o alerta de "margem perigosa" é exibido na UI. */
 export const MARGEM_SEGURA_MINIMA_PERCENT = 10;
 

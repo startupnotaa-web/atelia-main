@@ -12,7 +12,7 @@ import { fetchUserLimitsAction } from '@/app/actions/user';
 import LimitModal from '@/components/LimitModal';
 import Tooltip from '@/components/Tooltip';
 import CostReceipt from '@/components/CostReceipt';
-import { calculatePricing, calculateReverseMargin, roundCents, MARGEM_SEGURA_MINIMA_PERCENT } from '@/lib/pricingEngine';
+import { calculatePricing, calculateReverseMargin, calculateCostPerHour, calculateToolDepreciationCost, roundCents, MARGEM_SEGURA_MINIMA_PERCENT } from '@/lib/pricingEngine';
 
 interface Material {
   id: string;
@@ -22,15 +22,16 @@ interface Material {
   estoqueId?: string;
 }
 
+/**
+ * Uma ferramenta usada na peça, sempre referenciando um Equipamento pré-cadastrado
+ * (equipamentoId) por hora-máquina. O tempo de uso é dividido em horas + minutos,
+ * como no Passo 2 (Mão de Obra), para facilitar o preenchimento de peças rápidas.
+ */
 interface Ferramenta {
   id: string;
-  nome: string;
-  valorCompra: string;
-  vidaUtil: string;
-  tempoUso: string;
-  custo: string;
-  custoDesgaste?: string;
-  equipamentoId?: string;
+  equipamentoId: string;
+  tempoUsoHoras: string;
+  tempoUsoMinutos: string;
 }
 
 interface ItemEstoque {
@@ -41,10 +42,13 @@ interface ItemEstoque {
   unidadeMedida: string;
 }
 
+/** Equipamento/máquina pré-cadastrado em /equipamentos (Equipment: preço + vida útil → custo/hora). */
 interface ItemEquipamento {
   id: string;
   nome: string;
-  custoDesgaste: number;
+  preco: number;
+  vidaUtilHoras: number;
+  custoPorHora: number;
 }
 
 // Cabeçalho numerado de cada passo — guia a artesã pela ordem de preenchimento.
@@ -97,7 +101,7 @@ export default function CalculadoraPage() {
   // 3. Materiais e Equipamentos
   // Adicionamos custoUnitario para permitir multiplicar pela quantidade
   const [materiais, setMateriais] = useState<any[]>([{ id: '1', nome: '', custo: '', quantidade: '1', isEstoque: false, custoUnitario: 0 }]);
-  const [ferramentas, setFerramentas] = useState<Ferramenta[]>([{ id: '1', nome: '', valorCompra: '', vidaUtil: '', tempoUso: '', custo: '0' }]);
+  const [ferramentas, setFerramentas] = useState<Ferramenta[]>([{ id: '1', equipamentoId: '', tempoUsoHoras: '', tempoUsoMinutos: '' }]);
   
   // 3b. Taxa de desperdício (perda de material)
   const [taxaDesperdicio, setTaxaDesperdicio] = useState('0');
@@ -185,7 +189,13 @@ export default function CalculadoraPage() {
       const items: ItemEquipamento[] = [];
       snap.forEach(docSnap => {
         const data = docSnap.data();
-        items.push({ id: docSnap.id, nome: data.nome, custoDesgaste: data.custoDesgaste || 0 });
+        const preco = parseFloat(data.preco ?? data.valorCompra ?? 0) || 0;
+        const vidaUtilHoras = parseFloat(data.vidaUtilHoras ?? data.vidaUtil ?? 0) || 0;
+        // Compatibilidade com equipamentos antigos, cadastrados só com um custo fixo de desgaste.
+        const custoPorHora = data.custoPorHora ?? (
+          vidaUtilHoras > 0 ? calculateCostPerHour(preco, vidaUtilHoras) : (data.custoDesgaste || 0)
+        );
+        items.push({ id: docSnap.id, nome: data.nome, preco, vidaUtilHoras, custoPorHora });
       });
       setItensEquipamento(items);
     } catch (error) {
@@ -225,10 +235,10 @@ export default function CalculadoraPage() {
   });
 
   const ferramentasParaEngine = ferramentas.map((fer) => {
-    const vc = parseFloat(fer.valorCompra) || 0;
-    const vu = parseFloat(fer.vidaUtil) || 1;
-    const tu = parseFloat(fer.tempoUso) || 0;
-    const custoTotal = fer.equipamentoId ? (parseFloat(fer.custoDesgaste || '0') * tu) : ((vc / vu) * tu);
+    const equipamento = itensEquipamento.find(eq => eq.id === fer.equipamentoId);
+    const horasUso = (parseFloat(fer.tempoUsoHoras) || 0) + ((parseFloat(fer.tempoUsoMinutos) || 0) / 60);
+    const custoPorHora = equipamento?.custoPorHora || 0;
+    const custoTotal = calculateToolDepreciationCost(custoPorHora, horasUso);
     return { custoTotal };
   });
 
@@ -335,25 +345,8 @@ export default function CalculadoraPage() {
     }));
   };
 
-  const handleFerramentaChange = (id: string, campo: string, valor: string) => {
-    setFerramentas(ferramentas.map(f => {
-      if (f.id !== id) return f;
-      
-      const newF = { ...f, [campo]: valor };
-      if (campo === 'equipamentoId') {
-        if (valor === '') {
-          newF.nome = '';
-          newF.custoDesgaste = '0';
-        } else {
-          const itemBd = itensEquipamento.find(i => i.id === valor);
-          if (itemBd) {
-            newF.nome = itemBd.nome;
-            newF.custoDesgaste = itemBd.custoDesgaste.toString();
-          }
-        }
-      }
-      return newF;
-    }));
+  const handleFerramentaChange = (id: string, campo: keyof Ferramenta, valor: string) => {
+    setFerramentas(ferramentas.map(f => (f.id === id ? { ...f, [campo]: valor } : f)));
   };
 
   // --- SALVAMENTOS ---
@@ -370,7 +363,12 @@ export default function CalculadoraPage() {
       materiais: materiais.filter(m => m.nome.trim() || m.custo),
       taxaDesperdicio: parseFloat(taxaDesperdicio) || 0,
       custoDesperdicio: resultado.custoDesperdicio,
-      ferramentas: ferramentas.filter(f => f.nome.trim() || f.custo),
+      ferramentas: ferramentas
+        .filter(f => f.equipamentoId)
+        .map(f => ({
+          nome: itensEquipamento.find(eq => eq.id === f.equipamentoId)?.nome || '',
+          tempoUsoHoras: (parseFloat(f.tempoUsoHoras) || 0) + ((parseFloat(f.tempoUsoMinutos) || 0) / 60),
+        })),
       custosFixos: custoFixoTotal,
       embalagens: custoEmbalagens,
       taxas: { margem: margemExibida, maquininha, plataforma, imposto },
@@ -418,7 +416,7 @@ export default function CalculadoraPage() {
     setTempoHoras('');
     setTempoMinutos('');
     setMateriais([{ id: Date.now().toString(), nome: '', custo: '', quantidade: '1' }]);
-    setFerramentas([{ id: Date.now().toString(), nome: '', valorCompra: '', vidaUtil: '', tempoUso: '', custo: '0' }]);
+    setFerramentas([{ id: Date.now().toString(), equipamentoId: '', tempoUsoHoras: '', tempoUsoMinutos: '' }]);
     setPrecoFinalOverride('');
   };
 
@@ -765,73 +763,74 @@ export default function CalculadoraPage() {
 
             {/* Passo 3b: Ferramentas */}
             <section className="bg-surface p-6 md:p-8 rounded-2xl shadow-sm border-2 border-border">
-              <StepHeader num={4} title="Usou máquinas ou ferramentas?" subtitle="O desgaste delas também entra no custo. Pule se não usou." />
-              <div className="space-y-3 mb-4">
-                {ferramentas.map((fer) => {
-                  const vc = parseFloat(fer.valorCompra) || 0;
-                  const vu = parseFloat(fer.vidaUtil) || 1;
-                  const tu = parseFloat(fer.tempoUso) || 0;
-                  const custoDesgasteBase = fer.equipamentoId ? (parseFloat(fer.custoDesgaste || '0')) : (vc / vu);
-                  const custoTotalFerramenta = custoDesgasteBase * tu;
-
-                  return (
-                  <div key={fer.id} className="flex flex-col sm:flex-row gap-2 items-start bg-background p-3 rounded-xl border border-border">
-                    <select
-                      value={fer.equipamentoId || ''}
-                      onChange={(e) => handleFerramentaChange(fer.id, 'equipamentoId', e.target.value)}
-                      className="w-full sm:w-1/4 px-3 py-2.5 rounded-lg border border-border bg-surface"
-                    >
-                      <option value="">Digitar manual...</option>
-                      {itensEquipamento.map(i => (
-                        <option key={i.id} value={i.id}>{i.nome}</option>
-                      ))}
-                    </select>
-                    
-                    {!fer.equipamentoId && (
-                      <input
-                        type="text" value={fer.nome} onChange={(e) => handleFerramentaChange(fer.id, 'nome', e.target.value)}
-                        placeholder="Nome da máquina"
-                        className="w-full sm:w-1/4 px-3 py-2.5 rounded-lg border border-border"
-                      />
-                    )}
-
-                    {!fer.equipamentoId && (
-                      <div className="flex gap-2 w-full sm:w-1/4">
-                        <input
-                          type="number" min="0" step="0.01" value={fer.valorCompra} onChange={(e) => handleFerramentaChange(fer.id, 'valorCompra', e.target.value)}
-                          placeholder="Valor (R$)"
-                          className="w-full px-3 py-2.5 rounded-lg border border-border"
-                          title="Valor de Compra"
-                        />
-                        <input
-                          type="number" min="0" step="0.01" value={fer.vidaUtil} onChange={(e) => handleFerramentaChange(fer.id, 'vidaUtil', e.target.value)}
-                          placeholder="Vida Útil (h)"
-                          className="w-full px-3 py-2.5 rounded-lg border border-border"
-                          title="Vida Útil (em horas)"
-                        />
-                      </div>
-                    )}
-                    
-                    <div className="flex items-center gap-2 w-full sm:w-auto ml-auto">
-                      <input
-                        type="number" min="0" step="0.01" value={fer.tempoUso} onChange={(e) => handleFerramentaChange(fer.id, 'tempoUso', e.target.value)}
-                        placeholder="Tempo Uso (h)"
-                        className="w-full sm:w-28 px-3 py-2.5 rounded-lg border border-border"
-                        title="Tempo de uso na peça (em horas)"
-                      />
-                      <div className="px-3 py-2.5 rounded-lg bg-surface border border-border text-sm font-bold text-slate-700 w-28 text-center shrink-0" title="Custo repassado">
-                        {formatCurrency(custoTotalFerramenta)}
-                      </div>
-                      <button onClick={() => setFerramentas(ferramentas.filter(f => f.id !== fer.id))} className="p-2.5 text-slate-400 hover:text-red-500 shrink-0">
-                        <Trash2 size={20} />
-                      </button>
-                    </div>
-                  </div>
-                )})}
+              <div className="flex items-start gap-2">
+                <StepHeader num={4} title="Usou máquinas ou ferramentas?" subtitle="Depreciação por hora-máquina: preço da máquina ÷ vida útil × tempo de uso na peça." />
+                <Tooltip text="Depreciação por Hora-Máquina: cada equipamento cadastrado tem um custo por hora (preço de compra ÷ vida útil em horas). Aqui você só escolhe a máquina e quanto tempo ela ficou ligada nesta peça — o custo é calculado sozinho." />
               </div>
-              <button onClick={() => setFerramentas([...ferramentas, { id: Date.now().toString(), nome: '', valorCompra: '', vidaUtil: '', tempoUso: '', custo: '0' }])} className="text-foreground font-bold hover:text-primary flex items-center gap-1 bg-background border-2 border-border px-4 py-2.5 rounded-xl transition-colors">
-                <Plus size={18} /> Adicionar Ferramenta
-              </button>
+
+              {itensEquipamento.length === 0 ? (
+                <div className="text-sm text-slate-500 bg-background border-2 border-dashed border-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <span>Você ainda não cadastrou nenhuma máquina ou ferramenta.</span>
+                  <button
+                    onClick={() => router.push('/equipamentos')}
+                    className="shrink-0 flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-slate-900 font-bold px-4 py-2 rounded-xl transition-colors"
+                  >
+                    <Settings size={16} /> Cadastrar Equipamento
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3 mb-4">
+                    {ferramentas.map((fer) => {
+                      const equipamento = itensEquipamento.find(eq => eq.id === fer.equipamentoId);
+                      const horasUso = (parseFloat(fer.tempoUsoHoras) || 0) + ((parseFloat(fer.tempoUsoMinutos) || 0) / 60);
+                      const custoTotalFerramenta = calculateToolDepreciationCost(equipamento?.custoPorHora || 0, horasUso);
+
+                      return (
+                        <div key={fer.id} className="flex flex-col sm:flex-row gap-2 items-start bg-background p-3 rounded-xl border border-border">
+                          <select
+                            value={fer.equipamentoId}
+                            onChange={(e) => handleFerramentaChange(fer.id, 'equipamentoId', e.target.value)}
+                            className="w-full sm:w-2/5 px-3 py-2.5 rounded-lg border border-border bg-surface"
+                          >
+                            <option value="">Selecione uma máquina...</option>
+                            {itensEquipamento.map(i => (
+                              <option key={i.id} value={i.id}>{i.nome} ({formatCurrency(i.custoPorHora)}/h)</option>
+                            ))}
+                          </select>
+
+                          <div className="flex gap-2 flex-1 w-full sm:w-auto">
+                            <input
+                              type="number" min="0" value={fer.tempoUsoHoras} onChange={(e) => handleFerramentaChange(fer.id, 'tempoUsoHoras', e.target.value)}
+                              placeholder="0"
+                              title="Horas de uso na peça"
+                              className="w-full px-3 py-2.5 rounded-lg border border-border text-center"
+                            />
+                            <input
+                              type="number" min="0" max="59" value={fer.tempoUsoMinutos} onChange={(e) => handleFerramentaChange(fer.id, 'tempoUsoMinutos', e.target.value)}
+                              placeholder="0"
+                              title="Minutos de uso na peça"
+                              className="w-full px-3 py-2.5 rounded-lg border border-border text-center"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 w-full sm:w-auto ml-auto shrink-0">
+                            <div className="px-3 py-2.5 rounded-lg bg-surface border border-border text-sm font-bold text-slate-700 w-28 text-center" title="Custo de depreciação repassado à peça">
+                              {formatCurrency(custoTotalFerramenta)}
+                            </div>
+                            <button onClick={() => setFerramentas(ferramentas.filter(f => f.id !== fer.id))} className="p-2.5 text-slate-400 hover:text-red-500 shrink-0">
+                              <Trash2 size={20} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => setFerramentas([...ferramentas, { id: Date.now().toString(), equipamentoId: '', tempoUsoHoras: '', tempoUsoMinutos: '' }])} className="text-foreground font-bold hover:text-primary flex items-center gap-1 bg-background border-2 border-border px-4 py-2.5 rounded-xl transition-colors">
+                    <Plus size={18} /> Adicionar Ferramenta
+                  </button>
+                </>
+              )}
             </section>
 
             {/* Passo 5: Custos Fixos e Embalagens */}

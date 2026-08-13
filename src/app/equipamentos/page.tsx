@@ -8,11 +8,15 @@ import { useRouter } from 'next/navigation';
 import { useTenant } from '@/lib/TenantProvider';
 import { Plus, Trash2, Settings, Lock } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
+import { calculateCostPerHour } from '@/lib/pricingEngine';
 
 interface Equipamento {
   id: string;
   nome: string;
-  custoDesgaste: number;
+  preco: number;
+  vidaUtilHoras: number;
+  /** Derivado: preco / vidaUtilHoras (R$ de depreciação por hora-máquina). */
+  custoPorHora: number;
 }
 
 export default function EquipamentosPage() {
@@ -22,7 +26,8 @@ export default function EquipamentosPage() {
   const [loading, setLoading] = useState(true);
   const [equipamentos, setEquipamentos] = useState<Equipamento[]>([]);
   const [nome, setNome] = useState('');
-  const [custo, setCusto] = useState('');
+  const [preco, setPreco] = useState('');
+  const [vidaUtilHoras, setVidaUtilHoras] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
@@ -48,10 +53,19 @@ export default function EquipamentosPage() {
       const items: Equipamento[] = [];
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data();
+        const precoItem = parseFloat(data.preco ?? data.valorCompra ?? 0) || 0;
+        const vidaUtilItem = parseFloat(data.vidaUtilHoras ?? data.vidaUtil ?? 0) || 0;
+        // Compatibilidade com equipamentos cadastrados antes desta versão, que
+        // guardavam apenas um "custo de desgaste" fixo por peça (sem preço/vida útil).
+        const custoPorHoraItem = data.custoPorHora ?? (
+          vidaUtilItem > 0 ? calculateCostPerHour(precoItem, vidaUtilItem) : (data.custoDesgaste || 0)
+        );
         items.push({
           id: docSnap.id,
           nome: data.nome,
-          custoDesgaste: data.custoDesgaste
+          preco: precoItem,
+          vidaUtilHoras: vidaUtilItem,
+          custoPorHora: custoPorHoraItem
         });
       });
       setEquipamentos(items);
@@ -63,17 +77,25 @@ export default function EquipamentosPage() {
 
   const adicionarEquipamento = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!user) return;
-    
+
     // Regra de Negócio: Paywall para conta Free
     if (!isPro && equipamentos.length >= 2) {
       setShowUpgradeModal(true);
       return;
     }
 
-    if (!nome.trim() || !custo) {
-      toast.error('Preencha o nome e o custo de desgaste.');
+    const precoNum = parseFloat(preco);
+    const vidaUtilNum = parseFloat(vidaUtilHoras);
+
+    if (!nome.trim() || !preco || !vidaUtilHoras) {
+      toast.error('Preencha o nome, o preço e a vida útil (em horas).');
+      return;
+    }
+
+    if (!(vidaUtilNum > 0)) {
+      toast.error('A vida útil precisa ser maior que zero para calcular a depreciação por hora.');
       return;
     }
 
@@ -81,18 +103,22 @@ export default function EquipamentosPage() {
     const loadingToast = toast.loading('Salvando equipamento...');
 
     try {
+      const custoPorHora = calculateCostPerHour(precoNum, vidaUtilNum);
       const novoEquipamento = {
         nome,
-        custoDesgaste: parseFloat(custo),
+        preco: precoNum,
+        vidaUtilHoras: vidaUtilNum,
+        custoPorHora,
         userId: user.uid,
         createdAt: new Date().toISOString()
       };
 
       const docRef = await addDoc(collection(db, 'equipamentos'), novoEquipamento);
-      
-      setEquipamentos([...equipamentos, { id: docRef.id, ...novoEquipamento }]);
+
+      setEquipamentos([...equipamentos, { id: docRef.id, nome, preco: precoNum, vidaUtilHoras: vidaUtilNum, custoPorHora }]);
       setNome('');
-      setCusto('');
+      setPreco('');
+      setVidaUtilHoras('');
       toast.success('Equipamento salvo com sucesso!', { id: loadingToast });
     } catch (error) {
       console.error('Erro ao salvar:', error);
@@ -104,7 +130,7 @@ export default function EquipamentosPage() {
 
   const removerEquipamento = async (id: string) => {
     if (!confirm('Deseja realmente excluir este equipamento?')) return;
-    
+
     const loadingToast = toast.loading('Excluindo...');
     try {
       await deleteDoc(doc(db, 'equipamentos', id));
@@ -131,7 +157,7 @@ export default function EquipamentosPage() {
   return (
     <div className="min-h-screen bg-background py-8 px-4 sm:px-6 lg:px-8 font-sans">
       <Toaster position="top-right" />
-      
+
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="flex items-center gap-3 mb-8">
           <div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl">
@@ -140,7 +166,7 @@ export default function EquipamentosPage() {
           <div>
             <h1 className="text-3xl font-bold text-slate-800">Equipamentos e Ferramentas</h1>
             <p className="text-slate-600 mt-1">
-              Gerencie suas máquinas e calcule o desgaste delas nas suas peças.
+              Cadastre suas máquinas e o sistema calcula sozinho a depreciação por hora de uso.
             </p>
           </div>
         </div>
@@ -150,7 +176,7 @@ export default function EquipamentosPage() {
           <div className="md:col-span-1">
             <form onSubmit={adicionarEquipamento} className="bg-surface p-6 rounded-2xl shadow-sm border border-border">
               <h2 className="text-lg font-semibold text-slate-800 mb-4">Novo Equipamento</h2>
-              
+
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Ferramenta</label>
@@ -162,19 +188,38 @@ export default function EquipamentosPage() {
                     className="w-full px-4 py-2.5 rounded-xl border border-border focus:ring-2 focus:ring-indigo-500 transition-colors"
                   />
                 </div>
-                
+
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Custo de Desgaste (R$ por peça)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Preço de Compra (R$)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
-                    value={custo}
-                    onChange={(e) => setCusto(e.target.value)}
-                    placeholder="Ex: 0.50"
+                    value={preco}
+                    onChange={(e) => setPreco(e.target.value)}
+                    placeholder="Ex: 1500"
                     className="w-full px-4 py-2.5 rounded-xl border border-border focus:ring-2 focus:ring-indigo-500 transition-colors"
                   />
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Vida Útil (horas de uso)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={vidaUtilHoras}
+                    onChange={(e) => setVidaUtilHoras(e.target.value)}
+                    placeholder="Ex: 10000"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border focus:ring-2 focus:ring-indigo-500 transition-colors"
+                  />
+                </div>
+
+                {preco && vidaUtilHoras && parseFloat(vidaUtilHoras) > 0 && (
+                  <div className="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                    Depreciação: {formatCurrency(calculateCostPerHour(parseFloat(preco) || 0, parseFloat(vidaUtilHoras)))} por hora de uso
+                  </div>
+                )}
 
                 <button
                   type="submit"
@@ -197,7 +242,7 @@ export default function EquipamentosPage() {
           <div className="md:col-span-2">
             <div className="bg-surface p-6 rounded-2xl shadow-sm border border-border">
               <h2 className="text-lg font-semibold text-slate-800 mb-4">Seus Equipamentos Salvos</h2>
-              
+
               {equipamentos.length === 0 ? (
                 <div className="text-center py-10 text-slate-500">
                   <Settings size={48} className="mx-auto mb-3 opacity-20" />
@@ -210,7 +255,11 @@ export default function EquipamentosPage() {
                       <div>
                         <h3 className="font-medium text-slate-800">{eq.nome}</h3>
                         <p className="text-sm text-slate-500">
-                          Desgaste por uso: {formatCurrency(eq.custoDesgaste)}
+                          {eq.vidaUtilHoras > 0
+                            ? `${formatCurrency(eq.preco)} ÷ ${eq.vidaUtilHoras}h de vida útil`
+                            : 'Equipamento antigo sem vida útil cadastrada'}
+                          {' — '}
+                          <span className="font-semibold text-slate-700">{formatCurrency(eq.custoPorHora)}/hora</span>
                         </p>
                       </div>
                       <button
@@ -241,13 +290,13 @@ export default function EquipamentosPage() {
               O plano Free permite cadastrar até 2 equipamentos. Para cadastrar ferramentas ilimitadas e calcular o desgaste completo do seu ateliê, assine o plano PRO.
             </p>
             <div className="flex flex-col gap-3">
-              <button 
+              <button
                 onClick={() => router.push('/perfil')}
                 className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold py-3 px-6 rounded-xl transition-transform active:scale-95"
               >
                 Fazer Upgrade para PRO
               </button>
-              <button 
+              <button
                 onClick={() => setShowUpgradeModal(false)}
                 className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-3 px-6 rounded-xl transition-colors"
               >
