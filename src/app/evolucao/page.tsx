@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { useTenant } from '@/lib/TenantProvider';
 import PaywallUpsell from '@/components/PaywallUpsell';
 import { TrendingUp, Activity, BarChart3, Clock, DollarSign, Package, Percent, Target, HeartPulse, Telescope, CheckSquare, Loader2 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { RevenueEvolutionChart } from '@/components/charts/RevenueEvolutionChart';
+import { IncomeVsExpenseChart } from '@/components/charts/IncomeVsExpenseChart';
 import { auth } from '@/lib/firebase';
 import { toast } from 'react-hot-toast';
 import { fetchDashboardData } from '@/app/actions/dashboard';
@@ -18,6 +19,8 @@ type Metrics = {
   runway: number;
   giroEstoque: number;
   cac: number;
+  receitaTotal: number;
+  despesaTotal: number;
 };
 
 type AIAnalysis = {
@@ -88,7 +91,9 @@ export default function EvolucaoPage() {
         liquidez,
         runway,
         giroEstoque,
-        cac
+        cac,
+        receitaTotal: faturamentoBruto,
+        despesaTotal: faturamentoBruto - lucroLiquido
       });
 
       setChartData(data.monthlySeries);
@@ -210,25 +215,20 @@ export default function EvolucaoPage() {
             </div>
           </div>
 
-          {/* Gráfico */}
-          <div className="bg-surface p-6 rounded-3xl shadow-sm border border-border mb-10">
-            <h2 className="text-xl font-bold text-slate-800 mb-6">Evolução: Receita vs Despesa</h2>
-            <div className="h-80 w-full">
-              {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                    <XAxis dataKey="mes" tick={{fill: '#64748B'}} axisLine={false} tickLine={false} />
-                    <YAxis tickFormatter={(val) => `R$ ${val}`} tick={{fill: '#64748B'}} axisLine={false} tickLine={false} width={80} />
-                    <Tooltip formatter={(val: any) => formatCurrency(Number(val))} />
-                    <Legend />
-                    <Line type="monotone" name="Receita" dataKey="receita" stroke="#10B981" strokeWidth={4} dot={{r: 4}} activeDot={{r: 6}} />
-                    <Line type="monotone" name="Despesa" dataKey="despesa" stroke="#EF4444" strokeWidth={4} dot={{r: 4}} activeDot={{r: 6}} />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-slate-400 font-bold">Nenhum dado financeiro para gerar gráfico.</div>
-              )}
+          {/* Gráficos */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+            <div className="lg:col-span-2 bg-surface p-6 rounded-3xl shadow-sm border border-border">
+              <h2 className="text-xl font-bold text-slate-800 mb-6">Evolução: Receita vs Despesa</h2>
+              <div className="h-80 w-full">
+                <RevenueEvolutionChart data={chartData} />
+              </div>
+            </div>
+            
+            <div className="lg:col-span-1 bg-surface p-6 rounded-3xl shadow-sm border border-border flex flex-col">
+              <h2 className="text-xl font-bold text-slate-800 mb-6">Proporção Geral</h2>
+              <div className="flex-1 w-full min-h-[250px]">
+                <IncomeVsExpenseChart receita={metrics.receitaTotal} despesa={metrics.despesaTotal} />
+              </div>
             </div>
           </div>
 

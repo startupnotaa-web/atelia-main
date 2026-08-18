@@ -13,7 +13,8 @@ import type { FinanceEntryType } from '@/app/actions/finance';
 // Removed fetchAIAdvice import
 import { updateMonthlyGoal } from '@/app/actions/user';
 import type { DashboardData } from '@/lib/dashboard';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { RevenueEvolutionChart } from '@/components/charts/RevenueEvolutionChart';
+import { IncomeVsExpenseChart } from '@/components/charts/IncomeVsExpenseChart';
 import { ChatbotWidget } from '@/components/ChatbotWidget';
 import { OnboardingChecklist } from '@/components/OnboardingChecklist';
 import { useTenant } from '@/lib/TenantProvider';
@@ -487,26 +488,10 @@ export default function DashboardPage() {
         <div className="lg:col-span-3 bg-surface rounded-3xl p-6 shadow-sm border-2 border-border flex flex-col">
           <h2 className="text-xl font-black text-foreground mb-6 flex items-center gap-2">
             <TrendingUp className="text-slate-400" />
-            Evolução Mensal (Caixa)
+            Evolução Mensal (Entradas vs Saídas)
           </h2>
-          <div className="h-64 w-full">
-            {data.evolutionChartData && data.evolutionChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.evolutionChartData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                  <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} tickFormatter={(val) => `R$ ${val}`} width={80} />
-                  <Tooltip 
-                    cursor={{fill: '#F1F5F9'}} 
-                    contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                    formatter={(val: any) => [formatCurrency(Number(val) || 0), 'Movimentação']}
-                  />
-                  <Bar dataKey="lucro" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-400 font-bold">Nenhum dado de evolução.</div>
-            )}
+          <div className="h-full min-h-[250px] w-full">
+            <RevenueEvolutionChart data={data.monthlySeries} />
           </div>
         </div>
 
@@ -613,6 +598,32 @@ export default function DashboardPage() {
               })()}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* PIE CHART ROW */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+        <div className="lg:col-span-1 bg-surface rounded-3xl border-2 border-border shadow-sm p-6 flex flex-col">
+          <h2 className="text-lg font-black text-foreground mb-4 flex items-center gap-2">
+            <DollarSign className="text-slate-400" />
+            Receitas vs Despesas
+          </h2>
+          <div className="h-64 w-full">
+            <IncomeVsExpenseChart 
+              receita={m.faturamentoBruto} 
+              despesa={(m.faturamentoBruto || 0) - (m.lucroLiquido || 0)} 
+            />
+          </div>
+        </div>
+        
+        <div className="lg:col-span-2 bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-3xl border-2 border-amber-100 shadow-sm p-6 flex flex-col justify-center items-center text-center">
+           <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm text-amber-500 mb-4">
+             <Target size={32} />
+           </div>
+           <h3 className="text-xl font-black text-amber-900 mb-2">Visão Limpa e Clara</h3>
+           <p className="text-amber-700 font-medium max-w-md">
+             Acompanhe a proporção entre suas entradas e saídas de forma simplificada para tomar as melhores decisões para o seu ateliê.
+           </p>
         </div>
       </div>
 
