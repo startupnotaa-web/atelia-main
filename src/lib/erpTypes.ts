@@ -2,6 +2,63 @@
 // A mesma forma de documento é lida/escrita por /pronta-entrega e /venda-balcao;
 // manter o tipo único evita que os módulos divirjam sobre o schema do Firestore.
 
+// --- Catálogo (coleção `catalogo`) ---
+
+/** Detalhamento estruturado de custos, gravado pela Calculadora em `detalhesCalculo`. */
+export interface CostBreakdown {
+  /** Custo de mão de obra (pró-labore × horas gastas). */
+  maoDeObra: number;
+  /** Lista de materiais utilizados na peça. */
+  materiais: Array<{
+    nome: string;
+    custo: string;
+    quantidade: string;
+    isEstoque?: boolean;
+    estoqueId?: string;
+    valorBaseUnidade?: number;
+    custoUnitario?: number;
+  }>;
+  /** % de desperdício aplicada sobre materiais. */
+  taxaDesperdicio: number;
+  /** Valor em R$ do desperdício calculado. */
+  custoDesperdicio: number;
+  /** Ferramentas/equipamentos utilizados com custo de depreciação. */
+  ferramentas: Array<{ nome: string; tempoUsoHoras: number; custoTotal?: number }>;
+  /** Rateio dos custos fixos mensais (aluguel, água/luz, internet). */
+  custosFixos: number;
+  /** Custo de embalagem + frete. */
+  embalagens: number;
+  /** Taxas transacionais e margem de lucro (%). */
+  taxas: {
+    margem: number;
+    maquininha: number;
+    plataforma: number;
+    imposto: number;
+  };
+  /** Se true, o preço final foi digitado manualmente (cálculo reverso). */
+  precoAjustadoManualmente: boolean;
+}
+
+/** Documento da coleção `catalogo` (produto precificado pela Calculadora). */
+export interface CatalogoItem {
+  id: string;
+  userId: string;
+  nome: string;
+  precoFinal: number;
+  /** Custo base de produção total (materiais + mão de obra + rateios). */
+  custoBase: number;
+  /** Lucro real em R$ (preço final − custo base − taxas). */
+  lucroReal: number;
+  fotoUrl?: string;
+  categoria?: string;
+  /** Detalhamento matemático completo — o "Raio-X" do preço do produto. */
+  detalhesCalculo?: CostBreakdown;
+  /** Margem de lucro (%) — derivada de `detalhesCalculo.taxas.margem` quando disponível. */
+  margemLucro?: number;
+  /** Se false, o produto não aparece na vitrine pública. */
+  visivelNaVitrine?: boolean;
+  createdAt: string;
+}
 /** Documento da coleção `estoque_pronto` (peças prontas na prateleira). */
 export interface EstoqueProntoItem {
   id: string;

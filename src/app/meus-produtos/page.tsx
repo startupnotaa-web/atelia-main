@@ -3,9 +3,23 @@
 import { useState, useEffect } from 'react';
 import { db, auth } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { Package, Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Package, Plus, Eye, EyeOff, Trash2, ChevronDown, Receipt } from 'lucide-react';
 import Link from 'next/link';
 import { fetchUserLimitsAction } from '@/app/actions/user';
+import CostReceipt from '@/components/CostReceipt';
+import type { PricingBreakdownItem } from '@/lib/pricingEngine';
+
+type CostBreakdown = {
+  maoDeObra?: number;
+  materiais?: any[];
+  taxaDesperdicio?: number;
+  custoDesperdicio?: number;
+  ferramentas?: any[];
+  custosFixos?: number;
+  embalagens?: number;
+  taxas?: { margem?: number; maquininha?: number; plataforma?: number; imposto?: number };
+  precoAjustadoManualmente?: boolean;
+};
 
 type Product = {
   id: string;
@@ -14,19 +28,54 @@ type Product = {
   fotoUrl: string;
   precoFinal: number;
   custoBase: number;
+  lucroReal: number;
   margemLucro: number;
   visivelNaVitrine?: boolean;
   createdAt: string;
+  detalhesCalculo?: CostBreakdown;
 };
+
+/**
+ * Converte o `detalhesCalculo` salvo pelo getPayloadBase() da Calculadora
+ * no formato `PricingBreakdownItem[]` que o CostReceipt espera.
+ */
+function buildBreakdownFromDetails(details: CostBreakdown, precoFinal: number): PricingBreakdownItem[] {
+  const custoMateriais = (details.materiais || []).reduce((sum: number, m: any) => {
+    const qty = parseFloat(m.quantidade) || 0;
+    if (m.isEstoque) return sum + (qty * (parseFloat(m.valorBaseUnidade) || 0));
+    return sum + (parseFloat(m.custo) || 0);
+  }, 0) + (details.custoDesperdicio || 0);
+
+  const custoFerramentas = (details.ferramentas || []).reduce((sum: number, f: any) => sum + (f.custoTotal || 0), 0);
+
+  const taxas = details.taxas || {};
+  const maquininha = taxas.maquininha || 0;
+  const plataforma = taxas.plataforma || 0;
+  const imposto = taxas.imposto || 0;
+  const totalTaxas = precoFinal * ((maquininha + plataforma + imposto) / 100);
+
+  const margem = taxas.margem || 0;
+  const lucro = precoFinal * (margem / 100);
+
+  return [
+    { label: 'Materiais', valor: custoMateriais },
+    { label: 'Mão de Obra', valor: details.maoDeObra || 0 },
+    { label: 'Ferramentas', valor: custoFerramentas },
+    { label: 'Custos Fixos', valor: details.custosFixos || 0 },
+    { label: 'Embalagem/Frete', valor: details.embalagens || 0 },
+    { label: 'Taxas (cartão/plataforma/imposto)', valor: Math.round(totalTaxas * 100) / 100 },
+    { label: 'Lucro', valor: Math.round(lucro * 100) / 100 },
+  ];
+}
 
 export default function MeusProdutosPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [userLimits, setUserLimits] = useState<any>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProducts = async () => {
-      // Usando onAuthStateChanged para garantir que o user está logado
       const unsubscribe = auth.onAuthStateChanged(async (user) => {
         if (user) {
           try {
@@ -39,7 +88,6 @@ export default function MeusProdutosPage() {
             querySnapshot.forEach((doc) => {
               data.push({ id: doc.id, ...doc.data() } as Product);
             });
-            // Sorting client-side to avoid needing a composite index immediately if we used orderBy in the query
             data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             setProducts(data);
             
@@ -64,7 +112,6 @@ export default function MeusProdutosPage() {
   };
 
   const toggleVisibility = async (productId: string, currentVisibility: boolean) => {
-    // Atualização otimista
     const newVisibility = currentVisibility === undefined ? false : !currentVisibility;
     setProducts(products.map(p => p.id === productId ? { ...p, visivelNaVitrine: newVisibility } : p));
     
@@ -74,7 +121,6 @@ export default function MeusProdutosPage() {
       });
     } catch (err) {
       console.error(err);
-      // Reverter em caso de erro
       setProducts(products.map(p => p.id === productId ? { ...p, visivelNaVitrine: currentVisibility } : p));
       alert("Erro ao atualizar a visibilidade.");
     }
@@ -138,7 +184,10 @@ export default function MeusProdutosPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {products.map(product => {
-              const isVisible = product.visivelNaVitrine !== false; // default true if undefined
+              const isVisible = product.visivelNaVitrine !== false;
+              const isExpanded = expandedId === product.id;
+              const hasBreakdown = !!product.detalhesCalculo;
+
               return (
               <div key={product.id} className={`bg-surface rounded-3xl shadow-sm border border-border overflow-hidden hover:shadow-md transition-all group flex flex-col relative ${!isVisible ? 'opacity-70' : ''}`}>
                 <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
@@ -174,7 +223,7 @@ export default function MeusProdutosPage() {
                 <div className="p-6 flex-1 flex flex-col justify-between">
                   <div>
                     <h3 className="text-xl font-bold text-slate-900 mb-2 line-clamp-2">{product.nome}</h3>
-                    <p className="text-sm text-slate-500 mb-4">Margem definida: <span className="font-bold">{product.margemLucro}%</span></p>
+                    <p className="text-sm text-slate-500 mb-4">Margem definida: <span className="font-bold">{product.detalhesCalculo?.taxas?.margem?.toFixed(1) || product.margemLucro || 0}%</span></p>
                   </div>
                   <div className="pt-4 border-t border-border">
                     <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Preço de Venda</span>
@@ -189,6 +238,39 @@ export default function MeusProdutosPage() {
                       <span className="mt-3 block text-center text-xs font-bold text-slate-400 bg-slate-100 py-1.5 rounded-lg border border-border">
                         Escondido da vitrine
                       </span>
+                    )}
+
+                    {/* Accordion: Detalhes de Custo */}
+                    {hasBreakdown && (
+                      <div className="mt-4">
+                        <button
+                          onClick={() => setExpandedId(isExpanded ? null : product.id)}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-background border-2 border-border text-sm font-bold text-slate-600 hover:text-foreground hover:border-slate-300 transition-all"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Receipt size={16} className="text-primary" />
+                            Raio-X do Custo
+                          </span>
+                          <ChevronDown
+                            size={16}
+                            className={`transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+                        <div
+                          className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[500px] opacity-100 mt-3' : 'max-h-0 opacity-0'}`}
+                        >
+                          <div className="bg-background rounded-xl border-2 border-border p-4">
+                            <CostReceipt
+                              items={buildBreakdownFromDetails(product.detalhesCalculo!, product.precoFinal)}
+                              total={product.precoFinal}
+                            />
+                            <div className="mt-3 pt-3 border-t border-border flex justify-between items-center">
+                              <span className="text-sm font-bold text-slate-600">Preço Final</span>
+                              <span className="text-lg font-black" style={{ color: '#4A5D23' }}>{formatCurrency(product.precoFinal)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
