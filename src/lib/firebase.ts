@@ -1,6 +1,11 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 
 const firebaseConfig = {
@@ -33,8 +38,35 @@ if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY)
   }
 }
 
+// --- Firestore com Persistência Offline ---
+// Usa `initializeFirestore` com `persistentLocalCache` para habilitar
+// leitura e escrita offline. Os dados são armazenados no IndexedDB do
+// navegador e sincronizados automaticamente quando a conexão volta.
+// O `persistentMultipleTabManager` permite que o cache funcione em
+// múltiplas abas simultaneamente.
+let db: ReturnType<typeof getFirestore>;
+
+if (typeof window !== 'undefined') {
+  // Client-side: inicializa com cache persistente para suporte offline
+  try {
+    db = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    });
+  } catch (e: any) {
+    // Se o Firestore já foi inicializado (ex: hot reload no dev, ou
+    // navegador antigo sem suporte a multi-tab persistence), usa a
+    // instância existente como fallback seguro.
+    console.warn('Firestore offline persistence fallback:', e.message);
+    db = getFirestore(app);
+  }
+} else {
+  // Server-side (SSR/RSC): usa instância padrão (sem cache local)
+  db = getFirestore(app);
+}
+
 const auth = getAuth(app);
-const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
 // Garante persistência local (essencial para PWA instalado)

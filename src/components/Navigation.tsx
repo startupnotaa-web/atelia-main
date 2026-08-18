@@ -2,15 +2,17 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Calculator, Package, Users, Settings, Menu, X, FileText, ShoppingBag, Store, Crown, ClipboardList, Sparkles, TrendingUp, PackageCheck, ShoppingCart, BarChart2 } from 'lucide-react';
+import { Home, Calculator, Package, Users, Settings, Menu, X, FileText, ShoppingBag, Store, Crown, ClipboardList, Sparkles, TrendingUp, PackageCheck, ShoppingCart, BarChart2, CloudOff } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth } from '@/lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 export default function Navigation() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const isOnline = useNetworkStatus();
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -83,6 +85,16 @@ export default function Navigation() {
             <h1 className="text-2xl font-heading font-bold text-foreground tracking-tight">Atel<span className="text-primary">IA</span></h1>
           </div>
           <p className="text-secondary mt-2 text-xs font-heading font-bold uppercase tracking-widest">Meu Ateliê</p>
+          
+          {!isOnline && (
+            <div className="mt-4 flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-700 p-2.5 rounded-lg">
+              <CloudOff size={16} className="mt-0.5 shrink-0" />
+              <div className="text-xs">
+                <span className="font-bold block">Modo Offline</span>
+                Salvo localmente. Sincroniza ao voltar.
+              </div>
+            </div>
+          )}
         </div>
         
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
@@ -116,12 +128,20 @@ export default function Navigation() {
           <img src="/icon.png" alt="Logo AtelIA" className="w-6 h-6 object-contain rounded-md" />
           <h1 className="text-xl font-heading font-bold text-foreground tracking-tight">Atel<span className="text-primary">IA</span></h1>
         </div>
-        <button 
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="text-secondary p-2 hover:bg-background rounded-lg transition-colors"
-        >
-          {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-        </button>
+        
+        <div className="flex items-center gap-2">
+          {!isOnline && (
+            <div className="bg-amber-100 text-amber-700 p-1.5 rounded-md" title="Modo Offline">
+              <CloudOff size={18} />
+            </div>
+          )}
+          <button 
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="text-secondary p-2 hover:bg-background rounded-lg transition-colors"
+          >
+            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+        </div>
       </header>
 
       {/* Menu Hamburger Aberto (Mobile) */}
