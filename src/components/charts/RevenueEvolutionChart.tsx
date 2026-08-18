@@ -54,7 +54,7 @@ export function RevenueEvolutionChart({ data }: Props) {
         <Tooltip 
           cursor={{ stroke: '#94A3B8', strokeWidth: 1, strokeDasharray: '4 4' }}
           contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-          formatter={(value: number) => formatCurrency(value)}
+          formatter={(value: any) => formatCurrency(Number(value) || 0)}
           itemStyle={{ fontWeight: 'bold' }}
         />
         <Area type="monotone" dataKey="receita" name="Receitas" stroke="#10B981" strokeWidth={3} fillOpacity={1} fill="url(#colorReceita)" />
