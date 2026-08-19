@@ -1,11 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { FileText, Loader2, ArrowRightCircle, CheckCircle2 } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import toast from 'react-hot-toast';
-import { fetchOrcamentos, atualizarStatusOrcamento, converterOrcamentoEmPedido } from '@/app/actions/quotes';
+import {
+  fetchOrcamentos,
+  atualizarStatusOrcamento,
+  converterOrcamentoEmPedido,
+  registerPdfGeneration,
+  fetchArtisanProfileForQuotes,
+} from '@/app/actions/quotes';
+import type { ArtisanProfile } from '@/app/actions/quotes';
 import type { Orcamento, OrcamentoStatus } from '@/lib/erpTypes';
+import LimitModal from '@/components/LimitModal';
+
+// @react-pdf/renderer usa APIs de navegador (Blob/URL.createObjectURL) — precisa
+// ficar fora do bundle de SSR, senão o build do Node tenta resolver o módulo errado.
+const OrcamentoActions = dynamic(() => import('@/components/pdf/OrcamentoActions'), { ssr: false });
+
+const EMPTY_ARTISAN_PROFILE: ArtisanProfile = { brandName: '', email: '', telefone: '', logoUrl: '' };
 
 const STATUS_LABEL: Record<OrcamentoStatus, string> = {
   rascunho: 'Rascunho',
@@ -32,6 +47,8 @@ export default function OrcamentosHistorico() {
   const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [artisanProfile, setArtisanProfile] = useState<ArtisanProfile>(EMPTY_ARTISAN_PROFILE);
+  const [showLimitModal, setShowLimitModal] = useState(false);
 
   const carregar = async (uid: string) => {
     setIsLoading(true);
@@ -45,12 +62,28 @@ export default function OrcamentosHistorico() {
       if (user) {
         setUserId(user.uid);
         carregar(user.uid);
+        fetchArtisanProfileForQuotes(user.uid).then(setArtisanProfile).catch(() => {});
       } else {
         setIsLoading(false);
       }
     });
     return () => unsubscribe();
   }, []);
+
+  /** Cada download de um orçamento já salvo também conta contra o limite do plano. */
+  const preflightDownload = async (): Promise<boolean> => {
+    if (!userId) return false;
+    const result = await registerPdfGeneration(userId);
+    if (!result.success) {
+      if (result.error === 'LIMIT_REACHED_PDF') {
+        setShowLimitModal(true);
+      } else {
+        toast.error(result.error || 'Erro ao registrar PDF.');
+      }
+      return false;
+    }
+    return true;
+  };
 
   const formatCurrency = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatDate = (val: unknown) => {
@@ -118,6 +151,28 @@ export default function OrcamentosHistorico() {
                 {STATUS_LABEL[orcamento.status]}
               </span>
               <span className="text-2xl font-black text-foreground">{formatCurrency(orcamento.valorFinal)}</span>
+              <OrcamentoActions
+                variant="compact"
+                pdfProps={{
+                  orcamentoId: orcamento.id,
+                  artisan: artisanProfile,
+                  clienteNome: orcamento.clienteNome,
+                  clienteTelefone: orcamento.clienteTelefone,
+                  itens: orcamento.itens.map(item => ({
+                    nome: item.nome,
+                    quantidade: item.quantidade,
+                    valorUnitario: item.precoUnitario,
+                    subtotal: item.precoUnitario * item.quantidade,
+                  })),
+                  desconto: orcamento.desconto,
+                  prazoEntregaDias: orcamento.prazoEntregaDias,
+                  validade: orcamento.validade,
+                  valorFinal: orcamento.valorFinal,
+                  dataEmissao: typeof orcamento.createdAt === 'string' ? orcamento.createdAt : undefined,
+                }}
+                fileName={`Orcamento_${orcamento.clienteNome.replace(/\s+/g, '_')}.pdf`}
+                onBeforeDownload={preflightDownload}
+              />
             </div>
           </div>
 
@@ -158,6 +213,12 @@ export default function OrcamentosHistorico() {
           )}
         </div>
       ))}
+
+      <LimitModal
+        isOpen={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        itemName="Orçamentos em PDF"
+      />
     </div>
   );
 }

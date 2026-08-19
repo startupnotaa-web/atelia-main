@@ -1,6 +1,6 @@
 'use server';
 
-import { getAdminDb } from '@/lib/firebase-admin';
+import { getAdminDb, getAdminAuth } from '@/lib/firebase-admin';
 import { checkPdfLimit, incrementPdfCount } from '@/lib/checkSubscriptionLimits';
 import { verifyAuth } from '@/lib/verifyAuth';
 import { revalidatePath } from 'next/cache';
@@ -12,6 +12,41 @@ export interface QuoteClient {
   id: string;
   name: string;
   phone: string;
+}
+
+/** Dados da artesã/ateliê exibidos no cabeçalho do PDF do orçamento. */
+export interface ArtisanProfile {
+  brandName: string;
+  email: string;
+  telefone: string;
+  logoUrl: string;
+}
+
+export async function fetchArtisanProfileForQuotes(userId: string): Promise<ArtisanProfile> {
+  try {
+    const authUserId = await verifyAuth();
+    if (authUserId !== userId) throw new Error('Não autorizado');
+
+    const db = getAdminDb();
+    const [userSnap, perfilSnap, authUser] = await Promise.all([
+      db.collection('users').doc(userId).get(),
+      db.collection('perfis').doc(userId).get(),
+      getAdminAuth().getUser(userId).catch(() => null),
+    ]);
+
+    const userData = userSnap.exists ? userSnap.data() || {} : {};
+    const perfilData = perfilSnap.exists ? perfilSnap.data() || {} : {};
+
+    return {
+      brandName: perfilData.brandName || userData.brandName || userData.nome || 'Meu Ateliê',
+      email: authUser?.email || '',
+      telefone: userData.telefone || '',
+      logoUrl: perfilData.logoUrl || '',
+    };
+  } catch (error) {
+    console.error('Erro ao buscar perfil da artesã para orçamento:', error);
+    return { brandName: 'Meu Ateliê', email: '', telefone: '', logoUrl: '' };
+  }
 }
 
 export interface QuoteProduct {

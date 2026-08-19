@@ -1,16 +1,27 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Download, MessageCircle, Plus, X, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+import { X } from 'lucide-react';
 import { auth } from '@/lib/firebase';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
-import { fetchClientsForQuotes, fetchProductsForQuotes, registerPdfGeneration, criarOrcamento } from '@/app/actions/quotes';
-import type { QuoteClient, QuoteProduct } from '@/app/actions/quotes';
+import {
+  fetchClientsForQuotes,
+  fetchProductsForQuotes,
+  registerPdfGeneration,
+  criarOrcamento,
+  fetchArtisanProfileForQuotes,
+} from '@/app/actions/quotes';
+import type { QuoteClient, QuoteProduct, ArtisanProfile } from '@/app/actions/quotes';
 import toast from 'react-hot-toast';
 import { fetchUserLimitsAction } from '@/app/actions/user';
 import LimitModal from '@/components/LimitModal';
 import { roundCents } from '@/lib/pricingEngine';
+
+// @react-pdf/renderer usa APIs de navegador (Blob/URL.createObjectURL) — precisa
+// ficar fora do bundle de SSR, senão o build do Node tenta resolver o módulo errado.
+const OrcamentoActions = dynamic(() => import('@/components/pdf/OrcamentoActions'), { ssr: false });
+
+const EMPTY_ARTISAN_PROFILE: ArtisanProfile = { brandName: '', email: '', telefone: '', logoUrl: '' };
 
 type OrcamentoItem = {
   id: string;
@@ -23,21 +34,19 @@ type OrcamentoItem = {
 };
 
 export default function GerarOrcamento() {
-  const pdfRef = useRef<HTMLDivElement>(null);
-  
   // State
   const [clientes, setClientes] = useState<QuoteClient[]>([]);
   const [catalog, setCatalog] = useState<QuoteProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [selectedClient, setSelectedClient] = useState<QuoteClient | null>(null);
   const [items, setItems] = useState<OrcamentoItem[]>([]);
   const [userLimits, setUserLimits] = useState<any>(null);
-  
+  const [artisanProfile, setArtisanProfile] = useState<ArtisanProfile>(EMPTY_ARTISAN_PROFILE);
+
   const [desconto, setDesconto] = useState('');
   const [prazoEntrega, setPrazoEntrega] = useState('');
 
-  const [isExporting, setIsExporting] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
 
   // Orçamento já persistido no Firestore, e a "assinatura" dos dados que ele
@@ -74,6 +83,11 @@ export default function GerarOrcamento() {
             try {
               const limits = await fetchUserLimitsAction(user.uid);
               setUserLimits(limits);
+            } catch (e) {}
+
+            try {
+              const profile = await fetchArtisanProfileForQuotes(user.uid);
+              setArtisanProfile(profile);
             } catch (e) {}
 
           } catch (e) {
@@ -135,102 +149,68 @@ export default function GerarOrcamento() {
     setItems(items.filter(it => it.id !== id));
   };
 
-  const generatePDF = async () => {
-    if (!selectedClient) return;
-    
-    // Check Limits
+  /**
+   * Roda antes de liberar o download do PDF: checa o limite do plano e
+   * persiste o orçamento no Firestore — sem isso ele vira um PDF solto, sem
+   * histórico e sem caminho de conversão em pedido (INTEGRATION_BLUEPRINT.md
+   * §2.7). Resolve `true` quando o download pode prosseguir.
+   */
+  const preflightAndPersistOrcamento = async (): Promise<boolean> => {
+    if (!selectedClient) return false;
+
     const user = auth.currentUser;
     if (!user) {
       toast.error('Usuário não autenticado.');
-      return;
+      return false;
     }
-    
-    setIsExporting(true);
-    try {
-      const result = await registerPdfGeneration(user.uid);
-      if (!result.success) {
-        if (result.error === 'LIMIT_REACHED_PDF') {
-          setShowLimitModal(true);
-        } else {
-          toast.error(result.error || 'Erro ao registrar PDF.');
-        }
-        setIsExporting(false);
-        return;
-      }
 
-      // Persiste o orçamento no Firestore antes de gerar o PDF — sem isso ele
-      // vira um PDF solto, sem histórico e sem caminho de conversão em pedido
-      // (INTEGRATION_BLUEPRINT.md §2.7). Não bloqueia a exportação se falhar.
-      if (!savedOrcamento || savedOrcamento.signature !== orcamentoSignature) {
-        const custoTotal = roundCents(items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0));
-        const orcamentoResult = await criarOrcamento({
-          userId: user.uid,
-          clienteId: selectedClient.id,
-          clienteNome: selectedClient.name,
-          clienteTelefone: selectedClient.phone,
-          itens: items.map(item => ({
-            produtoId: item.id,
-            nome: item.name,
-            quantidade: item.quantity,
-            precoUnitario: item.unitPrice,
-            custoUnitario: item.unitCost,
-          })),
-          desconto: valorDesconto,
-          prazoEntregaDias: prazoEntrega ? Number(prazoEntrega) : undefined,
-          valorFinal: totalComDesconto,
-          custoTotal,
-        });
-        if (orcamentoResult.success && orcamentoResult.id) {
-          setSavedOrcamento({ id: orcamentoResult.id, signature: orcamentoSignature });
-        } else {
-          console.error('Falha ao salvar orçamento:', orcamentoResult.error);
-          toast.error('O orçamento não pôde ser salvo no histórico, mas o PDF será gerado normalmente.');
-        }
+    const result = await registerPdfGeneration(user.uid);
+    if (!result.success) {
+      if (result.error === 'LIMIT_REACHED_PDF') {
+        setShowLimitModal(true);
+      } else {
+        toast.error(result.error || 'Erro ao registrar PDF.');
       }
-
-      if (!pdfRef.current) throw new Error("Elemento do PDF não encontrado.");
-      
-      const canvas = await html2canvas(pdfRef.current, { 
-        scale: 2, 
-        useCORS: true,
-        logging: true 
-      });
-      
-      const imgData = canvas.toDataURL('image/jpeg', 0.98);
-      
-      const pdf = new jsPDF({
-        orientation: 'p',
-        unit: 'mm',
-        format: 'a4'
-      });
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Orcamento_${selectedClient.name.replace(/\s+/g, '_')}.pdf`);
-    } catch (err) {
-      console.error("Erro ao gerar PDF:", err);
-      alert("Falha ao gerar o PDF: " + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      setIsExporting(false);
+      return false;
     }
+
+    // Não bloqueia o download se a persistência falhar.
+    if (!savedOrcamento || savedOrcamento.signature !== orcamentoSignature) {
+      const custoTotal = roundCents(items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0));
+      const orcamentoResult = await criarOrcamento({
+        userId: user.uid,
+        clienteId: selectedClient.id,
+        clienteNome: selectedClient.name,
+        clienteTelefone: selectedClient.phone,
+        itens: items.map(item => ({
+          produtoId: item.id,
+          nome: item.name,
+          quantidade: item.quantity,
+          precoUnitario: item.unitPrice,
+          custoUnitario: item.unitCost,
+        })),
+        desconto: valorDesconto,
+        prazoEntregaDias: prazoEntrega ? Number(prazoEntrega) : undefined,
+        valorFinal: totalComDesconto,
+        custoTotal,
+      });
+      if (orcamentoResult.success && orcamentoResult.id) {
+        setSavedOrcamento({ id: orcamentoResult.id, signature: orcamentoSignature });
+      } else {
+        console.error('Falha ao salvar orçamento:', orcamentoResult.error);
+        toast.error('O orçamento não pôde ser salvo no histórico, mas o PDF será gerado normalmente.');
+      }
+    }
+
+    return true;
   };
 
-  const handleWhatsAppShare = async () => {
-    if (!selectedClient || !selectedClient.phone) {
-      alert('Cliente sem WhatsApp cadastrado.');
-      return;
-    }
-    
-    // Gera e baixa o PDF antes de abrir o zap
-    await generatePDF();
-
+  const openWhatsAppChat = () => {
+    if (!selectedClient) return;
     const itemListText = items.map(i => `${i.quantity}x ${i.name}`).join(', ');
     const msg = `Olá ${selectedClient.name}, tudo bem? Aqui está o resumo do seu orçamento.\n\nItens: ${itemListText}.\nTotal: ${formatCurrency(totalComDesconto)}.\n\nO PDF detalhado segue logo abaixo. Fico à disposição para qualquer dúvida!`;
     const encodedMsg = encodeURIComponent(msg);
-    const num = selectedClient.phone.replace(/\D/g, '');
-    
+    const num = (selectedClient.phone || '').replace(/\D/g, '');
     const waUrl = `https://wa.me/55${num}?text=${encodedMsg}`;
     window.open(waUrl, '_blank');
   };
@@ -360,94 +340,34 @@ export default function GerarOrcamento() {
       )}
 
       {/* BOTÕES DE AÇÃO FINAL */}
-      {canExport && (
+      {canExport && selectedClient && (
         <div className="w-full max-w-4xl flex flex-col md:flex-row gap-4 mb-16 animate-in fade-in slide-in-from-bottom-4">
-           <button 
-             onClick={generatePDF}
-             disabled={isExporting || (userLimits && !userLimits.isPro && userLimits.usage.generatedPdfs >= userLimits.limits.generatedPdfs)}
-             className="flex-1 bg-[#E25822] hover:bg-[#c94b1a] text-white text-xl font-black px-8 py-5 rounded-2xl transition-all shadow-md flex items-center justify-center gap-3 disabled:opacity-50"
-           >
-             {isExporting ? <Loader2 className="animate-spin" size={28} /> : <Download size={28} />}
-             Baixar PDF
-           </button>
-
-           <button 
-             onClick={handleWhatsAppShare}
-             className="flex-1 bg-[#4A5D23] hover:bg-[#3d4d1d] text-white text-xl font-black px-8 py-5 rounded-2xl transition-all shadow-md flex items-center justify-center gap-3"
-           >
-             <MessageCircle size={28} />
-             Enviar pelo WhatsApp
-           </button>
+          <OrcamentoActions
+            pdfProps={{
+              orcamentoId: savedOrcamento?.id,
+              artisan: artisanProfile,
+              clienteNome: selectedClient.name,
+              clienteTelefone: selectedClient.phone,
+              itens: items.map(item => ({
+                nome: item.name,
+                quantidade: item.quantity,
+                valorUnitario: item.unitPrice,
+                subtotal: item.total,
+              })),
+              desconto: valorDesconto,
+              prazoEntregaDias: prazoEntrega ? Number(prazoEntrega) : undefined,
+              valorFinal: totalComDesconto,
+            }}
+            fileName={`Orcamento_${selectedClient.name.replace(/\s+/g, '_')}.pdf`}
+            onBeforeDownload={preflightAndPersistOrcamento}
+            disabled={!!(userLimits && !userLimits.isPro && userLimits.usage.generatedPdfs >= userLimits.limits.generatedPdfs)}
+            onWhatsAppShare={openWhatsAppChat}
+            whatsappDisabled={!selectedClient.phone}
+          />
         </div>
       )}
 
-      {/* Papel A4 Virtual para Exportação PDF (Invisível na UI mas renderizável) */}
-      <div className="fixed top-0 left-[-9999px] z-[-1]">
-         <div 
-           ref={pdfRef}
-           className="bg-surface relative flex flex-col"
-           style={{ width: '800px', minHeight: '1131px', backgroundColor: '#FFFFFF', padding: '40px' }}
-         >
-           {/* Cabeçalho */}
-           <div className="flex justify-between items-start border-b-4 border-secondary pb-6 mb-8">
-              <div>
-                 <h1 className="text-4xl font-black text-foreground">Orçamento Profissional</h1>
-                 <p className="text-[#64748B] text-lg font-medium mt-1">Data: {new Date().toLocaleDateString('pt-BR')}</p>
-              </div>
-              <div className="text-right">
-                 <h2 className="text-xl font-bold text-[#1E293B] uppercase">Cliente: {selectedClient?.name}</h2>
-                 <p className="text-[#475569] font-bold">Contato: {selectedClient?.phone}</p>
-              </div>
-           </div>
-
-           {/* Corpo */}
-           <div className="flex-1">
-              <table className="w-full text-left border-collapse mb-8">
-                 <thead>
-                    <tr className="border-b-2 border-[#E2E8F0] bg-[#F8FAFC]">
-                       <th className="py-4 px-4 text-[#64748B] font-bold uppercase text-sm">Produto</th>
-                       <th className="py-4 px-4 text-[#64748B] font-bold uppercase text-sm text-center">Qtd.</th>
-                       <th className="py-4 px-4 text-[#64748B] font-bold uppercase text-sm text-right">Subtotal</th>
-                    </tr>
-                 </thead>
-                 <tbody>
-                    {items.map(item => (
-                       <tr key={item.id} className="border-b border-[#F1F5F9]">
-                          <td className="py-4 px-4 text-lg font-bold text-[#334155]">{item.name}</td>
-                          <td className="py-4 px-4 text-lg font-medium text-[#475569] text-center">{item.quantity}</td>
-                          <td className="py-4 px-4 text-lg font-bold text-foreground text-right">{formatCurrency(item.total)}</td>
-                       </tr>
-                    ))}
-                 </tbody>
-              </table>
-              
-              {valorDesconto > 0 && (
-                 <div className="flex justify-end text-lg font-bold text-[#64748B] mb-4 px-4">
-                    <span className="w-48 text-right pr-8">Desconto:</span>
-                    <span className="text-[#EF4444]">- {formatCurrency(valorDesconto)}</span>
-                 </div>
-              )}
-
-              {/* Total Final */}
-              <div className="flex justify-end px-4">
-                 <div className="bg-secondary text-white p-6 rounded-2xl w-full max-w-xs flex justify-between items-center shadow-md">
-                    <span className="text-lg font-bold uppercase tracking-wider">Total</span>
-                    <span className="text-2xl font-black">{formatCurrency(totalComDesconto)}</span>
-                 </div>
-              </div>
-           </div>
-
-           {/* Rodapé */}
-           <div className="pt-8 border-t-2 border-[#F1F5F9] text-center mt-auto">
-              {prazoEntrega && (
-                 <p className="text-lg font-bold text-[#1E293B] mb-2">Prazo de Entrega Estimado: {prazoEntrega} dias</p>
-              )}
-              <p className="text-[#64748B] font-medium">Agradecemos a preferência!</p>
-           </div>
-         </div>
-      </div>
-
-      <LimitModal 
+      <LimitModal
         isOpen={showLimitModal} 
         onClose={() => setShowLimitModal(false)} 
         itemName="Orçamentos em PDF" 
